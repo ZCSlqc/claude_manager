@@ -1,9 +1,5 @@
-# Python
-__pycache__/
-*.py[cod]
-*.so
+# Virtual env
 .venv/
-venv/
 
 # Database
 data/*.db
