@@ -28,11 +28,9 @@ fi
 sleep 1
 
 # ==================== 启动后端 ====================
-cd backend
-nohup "$VENV/bin/python3" -m uvicorn server:app --host 0.0.0.0 --port 8112 > /dev/null 2>&1 &
+nohup "$VENV/bin/python3" -m uvicorn backend.main:app --host 0.0.0.0 --port 8112 > /dev/null 2>&1 &
 PID_BE=$!
 echo "$PID_BE" > "$PID_BACKEND"
-cd ..
 sleep 2
 
 curl -sf http://127.0.0.1:8112/health > /dev/null || {
