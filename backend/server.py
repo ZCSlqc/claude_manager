@@ -147,6 +147,29 @@ def _determine_status(parsed: dict) -> int:
     return 4
 
 
+async def _get_claude_sessionid(dir_path: str, message: str = "你好", timeout: int = 120) -> str:
+    """异步执行 Claude 创建/获取 session_id。发一条短消息，解析返回的 session_id。"""
+    cmd = list(_CLAUDE_CMD)
+    if not cmd[-1] == "--output-format":  # 确保 --output-format 和 json 已经配对
+        cmd.extend(["--output-format", "json"])
+    # _CLAUDE_CMD 已经是 [..., "--output-format", "json"]，不需要再追加
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        message,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        text=True,
+        cwd=dir_path,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        parsed = _parse_claude_json(stdout)
+        return parsed.get("session_id", "")
+    except Exception:
+        return ""
+
+
 def _run_claude_sync(message: str, project_dir: str, session_id: str | None = None, project_id: str | None = None, max_turns: int | None = None) -> dict:
     """同步执行 claude subprocess。返回 {success, output, error, parsed, raw_stdout}。
 
@@ -397,9 +420,9 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
 
 
 @app.post("/api/claude")
-def _internal_claude(req: InternalRequest):
-    """核心入口：查/建 user + 查/建 project + 创建 session(如需要) + 后台执行 Claude。
-    返回: {project_id}，后台线程后续更新 DB。
+async def _internal_claude(req: InternalRequest):
+    """核心入口：查/建 user + 查/建 project + 创建 session(如需要) + 异步执行 Claude。
+    返回: {project_id}，后台协程后续更新 DB。
     """
     try:
         user = req.user
@@ -458,13 +481,7 @@ def _internal_claude(req: InternalRequest):
 
         # ── 步骤 5: 首次创建 session（如果还没有） ──
         if not session_id:
-            # 同步等待首次 session 创建（必须拿到 session_id）
-            step_a = _run_claude_sync(
-                message="你好",
-                project_dir=dir_path,
-                project_id=project_id,
-            )
-            new_sid = step_a["parsed"]["session_id"]
+            new_sid = await _get_claude_sessionid(dir_path, "你好")
             if not new_sid:
                 _busy_locks.pop(project_id, None)
                 raise HTTPException(500, "无法创建会话：未拿到 session_id")
@@ -473,14 +490,14 @@ def _internal_claude(req: InternalRequest):
             database.update_project(project_id, session_id=new_sid)
             session_id = new_sid
 
-        # ── 步骤 6: 标记为进行中，启动后台线程，立即返回 ──
+        # ── 步骤 6: 标记为进行中，启动后台协程，立即返回 ──
         database.update_project(
             project_id,
             user_input=message,
             is_finished=0,
         )
 
-        # 异步启动 Claude，不阻塞 event loop
+        # 异步执行 Claude，不阻塞 event loop
         asyncio.create_task(
             _run_claude_project(project_id, dir_path, message, session_id),
             name=f"claude-{project_id[:8]}",
