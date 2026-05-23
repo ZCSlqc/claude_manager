@@ -9,13 +9,11 @@
 import asyncio
 import json
 import os
-import random
 import subprocess
 import sys
+import shutil
 import re
-import time
 from pathlib import Path
-from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -54,7 +52,6 @@ logger.add(
 
 # ── 配置 ──────────────────────────────────────────────────
 SUBPROCESS_TIMEOUT = 900
-MAX_RETRIES = 1
 PID_CHECK_INTERVAL = 60
 
 # ── Pydantic 模型 ─────────────────────────────────────────
@@ -63,16 +60,6 @@ class InternalRequest(BaseModel):
     user: str
     dir: str
     message: str
-
-class SessionResponse(BaseModel):
-    session_id: str
-    project_id: str = ""
-    session_avatar_id: int = 1
-    status: str  # success | failed | started
-    output: str = ""
-    error: str | None = None
-    retries: int = 0
-    claude_result: dict = {}
 
 # ── 全局状态 ──────────────────────────────────────────────
 app = FastAPI(title="Claude Code Proxy")
@@ -96,6 +83,7 @@ async def wrap_response(request: Request, call_next):
     if response.media_type and response.media_type not in ("application/json", "text/json"):
         return response
 
+    # 200 成功响应：包装
     # 读取原始 body
     body_bytes = b"".join([c async for c in response.body_iterator])
     original = None
@@ -106,28 +94,61 @@ async def wrap_response(request: Request, call_next):
             pass
 
     if original is None:
-        # 无法解析的 body 原样返回
         return JSONResponse(
-            content={"success": False, "code": response.status_code, "data": {}, "msg": ""}
+            content={"success": True, "code": 200, "data": {}, "msg": ""}
         )
 
-    if response.status_code == 200:
-        return JSONResponse(
-            content={"success": True, "code": 200, "data": original, "msg": ""}
-        )
-    elif response.status_code == 409:
-        return JSONResponse(
-            content={
-                "success": False,
-                "code": 409,
-                "data": original if isinstance(original, dict) else {},
-                "msg": original.get("error", "") if isinstance(original, dict) else "",
-            }
-        )
-    else:
-        return JSONResponse(
-            content={"success": False, "code": response.status_code, "data": {}, "msg": ""}
-        )
+    return JSONResponse(
+        content={"success": True, "code": 200, "data": original, "msg": ""}
+    )
+
+
+# ── 自定义异常处理：统一错误格式 ─────────────────────────
+
+from fastapi.exceptions import RequestValidationError
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTPException → {success: false, code, data: {}, msg: detail}"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "code": exc.status_code,
+            "data": {},
+            "msg": exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False),
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """参数校验错误 → {success: false, code: 422, data: {}, msg: ...}"""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "code": 422,
+            "data": {},
+            "msg": str(exc.errors()),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """未捕获异常 → {success: false, code: 500, data: {}, msg: ...}"""
+    logger.exception(f"unhandled: {request.method} {request.url.path}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "code": 500,
+            "data": {},
+            "msg": str(exc),
+        },
+    )
 
 
 # ── 核心: 解析 Claude JSON ───────────────────────────────
@@ -333,7 +354,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
             )
         else:
             logger.warning(
-                f"async finished: project={project_id} status={final_status} retries={retries_done}"
+                f"async finished: project={project_id} status={final_status}"
             )
 
     except Exception as e:
@@ -419,7 +440,7 @@ async def _internal_claude(req: InternalRequest):
         )
 
         # 立即返回 project_id
-        return {"state": "success", "project_id": project_id}
+        return {"project_id": project_id}
 
     except HTTPException:
         raise
