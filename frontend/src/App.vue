@@ -77,6 +77,7 @@
       @delete="handleDelete"
       @log="openLogModal"
       @delete-user="handleDeleteUser"
+      @preview="openReplyPreview"
     />
 
     <!-- Log Modal -->
@@ -85,6 +86,23 @@
       :project-id="logProjectId"
       @close="showLogModal = false"
     />
+
+    <!-- Reply Preview Modal -->
+    <div v-if="showReplyPreview" class="modal-overlay" @click.self="showReplyPreview = false">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <span class="modal-title">Reply 预览</span>
+          </div>
+          <div class="modal-header-right">
+            <button class="btn-close" @click="showReplyPreview = false">✕</button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <pre class="reply-preview-text">{{ modalProject?.claude_output || '—' }}</pre>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Toast -->
@@ -126,6 +144,7 @@ const toast = ref(null) // { msg, type }
 const currentUserId = ref('') // 跟踪当前表单选中的 user_id
 const showLogModal = ref(false)
 const logProjectId = ref('')
+const showReplyPreview = ref(false)
 
 // ── Computed ──
 const sortedProjects = computed(() => {
@@ -293,6 +312,10 @@ function openLogModal(e, proj) {
     logProjectId.value = p.project_id
     showLogModal.value = true
   }
+}
+function openReplyPreview(proj) {
+  modalProject.value = proj || selectedProject.value
+  showReplyPreview.value = true
 }
 function handleDeleteUser(proj) {
   const uid = proj?.user_id
@@ -613,7 +636,7 @@ body::before {
 .project-thumb:active {
   transform: translateY(0);
 }
-.thumb-top { padding: 3px 8px; display: flex; gap: 8px; align-items: flex-start; }
+.thumb-top { padding: 3px 8px; display: flex; gap: 8px; align-items: flex-start; flex: 1; }
 .thumb-avatar { border-radius: 4px; flex-shrink: 0; }
 .thumb-right {
   flex: 1;
@@ -648,6 +671,7 @@ body::before {
   color: var(--warning);
 }
 .thumb-bottom {
+  margin-top: auto;
   padding: 4px 8px 8px;
   font-size: 9px;
   color: var(--text-dim);
@@ -815,12 +839,47 @@ body::before {
   margin-bottom: 8px;
   letter-spacing: 0.5px;
 }
+.detail-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.detail-label-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.detail-label-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.btn-copy {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.btn-copy:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
 .detail-text {
   font-size: 15px;
   color: var(--text);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  height: 12em;
+  overflow-y: auto;
 }
 .detail-text.reply {
   height: 12em;
@@ -904,4 +963,15 @@ body::before {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--purple); }
+.reply-preview-text {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  margin: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
 </style>

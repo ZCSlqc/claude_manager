@@ -32,8 +32,9 @@
     <!-- 消息输入 -->
     <div class="form-group">
       <label>Message</label>
-      <textarea v-model="form.message" placeholder="Enter a message... (Ctrl+Enter)"
-        @keydown.ctrl.enter="$emit('send')" :disabled="sending"></textarea>
+      <textarea v-model="form.message" placeholder="Enter a message... (Ctrl+Enter to add a new line)"
+        @keydown.enter.shift="form.message += '\n'"
+        @keydown.enter.prevent.exact="$emit('send')" :disabled="sending"></textarea>
     </div>
 
     <button class="btn-send" @click="$emit('send')" :disabled="sending || !canSend">

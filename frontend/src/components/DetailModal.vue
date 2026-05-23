@@ -32,15 +32,26 @@
         </div>
         <div class="detail-panels">
           <div class="detail-panel detail-panel-left" :class="{ failed: project.status && project.status > 0 }">
-            <div class="detail-label">Message</div>
+            <div class="detail-label-row">
+              <span class="detail-label">Message</span>
+              <button v-if="project.user_input" class="btn-copy" title="复制消息" @click="copyMessage">复制</button>
+            </div>
             <div class="detail-text">{{ project.user_input || '—' }}</div>
           </div>
           <div class="detail-panel detail-panel-right" :class="{ failed: project.status && project.status > 0 }">
-            <div class="detail-label">Reply</div>
+            <div class="detail-label-row">
+              <div class="detail-label-group">
+                <span class="detail-label">Reply</span>
+                <div class="detail-label-actions">
+                  <button v-if="project.is_finished && replyText" class="btn-copy" title="预览回复" @click="emit('preview', project)">预览</button>
+                  <button v-if="project.is_finished && replyText" class="btn-copy" title="复制回复" @click="copyReply">复制</button>
+                </div>
+              </div>
+            </div>
             <div v-if="!project.is_finished" :class="['detail-text', 'reply', 'reply-running']">等待 Claude 回复...</div>
             <div v-else-if="replyText" :class="['detail-text', 'reply']">{{ replyText }}</div>
-            <div v-if="project.error && !replyText" class="detail-text error">{{ project.error }}</div>
-            <div v-if="!replyText && !project.is_finished && !project.error" class="detail-text">—</div>
+            <div v-else-if="project.error" class="detail-text error">{{ project.error }}</div>
+            <div v-else class="detail-text">—</div>
           </div>
         </div>
 
@@ -113,6 +124,17 @@ const statusLabel = computed(getStatusLabel)
 const statusClass = computed(getStatusClass)
 
 const replyText = computed(() => props.project?.claude_output || '')
+
+function copyReply() {
+  if (replyText.value) {
+    navigator.clipboard.writeText(replyText.value)
+  }
+}
+function copyMessage() {
+  if (props.project?.user_input) {
+    navigator.clipboard.writeText(props.project.user_input)
+  }
+}
 
 function parseModalData(prop) {
   if (!props.project) return null
