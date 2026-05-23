@@ -157,12 +157,15 @@ async def _pid_checker():
             try:
                 os.kill(pid, 0)
             except OSError:
-                update_project(
-                    project_id,
+                prefix = api_claude._log_claude(project_id)
+                error = "PID KILLED"
+                result = {"duration_ms":0,"num_turns":0,"result":error}
+                update_project(project_id,
                     subprocess_pid=0,
-                    claude_result=json.dumps({"error": "pid killed"}, ensure_ascii=False),
-                    is_finished=1,
+                    claude_output=error,
+                    claude_result=json.dumps(result, ensure_ascii=False),
                     status=4,
-                )
-                logger.info(f"[CALLBACK] success=False data={{project_id={project_id}}} msg=PID KILLED")
+                    is_finished=1)
+                logger.info(f"[CALLBACK] success=False data={{project_id={project_id}}} msg={error}")
+                logger.exception(f"[{prefix}] FAIL :status=4({error})")
 
