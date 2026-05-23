@@ -137,8 +137,8 @@ def add_project(user_id: str, folder_name: str) -> dict:
         pid = _uid()
         ts = time.time()
         avatar_id = int.from_bytes(folder_name.encode(), 'big') % 100 + 1
-        # claude_path: ~/.claude/projects/-{dir_with_dashes}
-        claude_path = Path(os.path.expanduser('~/.claude/projects/-' + folder_name.replace('/', '-'))).as_posix()
+        # claude_path: ~/.claude/projects/{dir_with_dashes}
+        claude_path = Path(os.path.expanduser('~/.claude/projects/' + folder_name.replace('/', '-'))).as_posix()
         conn.execute(
             "INSERT INTO project (project_id, user_id, folder_name, claude_path, session_avatar_id, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",

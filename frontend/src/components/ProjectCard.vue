@@ -2,12 +2,13 @@
   <div
     class="project-thumb"
     :class="{ active: selected, running: isRunning(project) }"
-    @click="$emit('select', project)">
+    @contextmenu.prevent="$emit('select', project)"
+    @click.prevent="$emit('context', project)">
     <div class="thumb-top">
       <img class="thumb-avatar" :src="thumbAvatar" :width="60" :height="60" :title="project.folder_name" />
       <div class="thumb-right">
         <span :class="['thumb-status', thumbStatusClass(project)]">{{ thumbStatusLabel(project) }}</span>
-        <div class="thumb-reply" :title="thumbReplyTitle(project)">{{ thumbReplyText(project) }}</div>
+        <div :class="['thumb-reply', { 'thumb-reply-running': !project.is_finished }]" :title="thumbReplyTitle(project)">{{ thumbReplyText(project) }}</div>
       </div>
     </div>
     <div class="thumb-bottom" :title="project.folder_name">{{ thumbPath(project) }}</div>
@@ -23,7 +24,7 @@ const props = defineProps({
   selected: { type: Boolean, default: false },
 })
 
-defineEmits(['select'])
+defineEmits(['select', 'context'])
 
 function isRunning(p) {
   return !p.is_finished

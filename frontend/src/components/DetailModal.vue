@@ -1,49 +1,72 @@
 <template>
-  <div v-if="visible" class="modal-overlay" @click.self="$emit('close')">
+  <div v-if="project" class="modal-overlay" @click.self="emit('close')">
     <div class="modal">
       <div class="modal-header">
-        <div>
-          <div class="modal-title">
-            <img class="modal-avatar" :src="avatarUrl(project.session_avatar_id, 'session')" :width="24" :height="24" />
-            <span>{{ shortPath }}</span>
-            <span :class="['thumb-status', statusClass]" style="margin-left:8px">{{ statusLabel }}</span>
-            <span v-if="project.retries > 0" style="margin-left:4px;color:var(--red)">({{ project.retries }}次重试)</span>
-          </div>
-          <div class="modal-subtitle">
-            {{ userName }} | {{ project.folder_name }} | SID: {{ sid }}
+        <div class="modal-header-left">
+          <div class="modal-user-row">
+            <div class="modal-avatar-block modal-avatar-user">
+              <img class="modal-avatar-img"
+                :src="avatarUrl(getUserAvatarId(project.user_id), 'user')"
+                :width="60" :height="60" :title="userName" />
+            </div>
+            <span class="modal-avatar-label">{{ userName }}</span>
+            <span class="modal-arrow">→</span>
+            <div class="modal-avatar-block modal-avatar-project">
+              <img class="modal-avatar-img"
+                :src="avatarUrl(project.session_avatar_id, 'session')"
+                :width="60" :height="60" :title="project.folder_name" />
+            </div>
+            <span class="modal-avatar-label">{{ project.folder_name }}</span>
           </div>
         </div>
-        <button class="btn-close" @click="$emit('close')">✕</button>
+        <div class="modal-header-right">
+          <span class="thumb-status" :class="statusClass">{{ statusLabel }}</span>
+          <span v-if="project.retries > 0" class="retries-badge">({{ project.retries }}次重试)</span>
+          <button class="btn-close" @click="emit('close')">✕</button>
+        </div>
       </div>
 
       <div class="modal-body">
-        <div class="detail-section">
-          <div class="detail-label">原始消息</div>
-          <div class="detail-text">{{ project.user_input || '—' }}</div>
+        <div class="modal-meta-line">
+          <span>Session: {{ project.session_id || '—' }}</span>
         </div>
-
-        <div class="detail-section" v-if="replyText || project.error">
-          <div class="detail-label">回复内容</div>
-          <div class="detail-text reply" v-if="replyText">{{ replyText }}</div>
-          <div class="detail-text error" v-if="project.error">{{ project.error }}</div>
+        <div class="detail-panels">
+          <div class="detail-panel detail-panel-left" :class="{ failed: project.status && project.status > 0 }">
+            <div class="detail-label">Message</div>
+            <div class="detail-text">{{ project.user_input || '—' }}</div>
+          </div>
+          <div class="detail-panel detail-panel-right" :class="{ failed: project.status && project.status > 0 }">
+            <div class="detail-label">Reply</div>
+            <div v-if="!project.is_finished" :class="['detail-text', 'reply', 'reply-running']">等待 Claude 回复...</div>
+            <div v-else-if="replyText" :class="['detail-text', 'reply']">{{ replyText }}</div>
+            <div v-if="project.error && !replyText" class="detail-text error">{{ project.error }}</div>
+            <div v-if="!replyText && !project.is_finished && !project.error" class="detail-text">—</div>
+          </div>
         </div>
 
         <div class="detail-meta">
-          <div v-if="turns">轮次: {{ turns }}</div>
-          <div v-if="cost != null">费用: ${{ cost?.toFixed(4) }}</div>
-          <div v-if="project.is_finished === 0">状态: 活跃中 (PID: {{ project.subprocess_pid || '—' }})</div>
-          <div v-if="project.created_at">创建: {{ dateStr(project.created_at) }}</div>
-          <div v-if="project.session_id">Session: {{ project.session_id }}</div>
+          <div>
+            <span>创建: {{ dateStr(project.created_at) }}</span>
+            <span style="margin-left: 24px;" v-if="turns != null">轮次: {{ turns }}</span>
+          </div>
+          <div>
+            <span>更新: {{ dateStr(project.updated_at) }}</span>
+            <span style="margin-left: 24px;" v-if="formattedDuration !== '—'">用时: {{ formattedDuration }}</span>
+          </div>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn-continue" @click="$emit('retry')"
-          :disabled="sending || statusClass !== 'failed'"
-          title="发送 Continue. 重试">
-          {{ sending ? '发送中...' : '重试 ▶' }}
-        </button>
-        <button class="btn-delete" @click="$emit('delete')">🗑 删除</button>
+        <div class="modal-footer-left" v-if="totalTokens > 0">总token: {{ totalTokens >= 1000000 ? Math.floor(totalTokens / 1000000) + 'M' : fmtToken(totalTokens) }}</div>
+        <div class="modal-footer-right">
+          <button class="btn btn-default modal-btn-log" @click="emit('log', project)">日志</button>
+          <button class="btn-continue" @click="emit('retry', project)"
+            :disabled="sending">
+            {{ sending ? '发送中...' : '重试 ▶' }}
+          </button>
+          <button class="btn-delete" @click="emit('delete', project)">删除项目</button>
+          <button class="btn-delete-all" @click="emit('delete-user', project)">删除用户</button>
+        </div>
       </div>
     </div>
   </div>
@@ -55,69 +78,71 @@ import { avatarUrl } from '../utils/avatar.js'
 
 const props = defineProps({
   project: { type: Object, required: true },
-  visible: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
-  userName: { type: String, default: '' },
+  userMap: { type: Object, default: () => ({}) },
+  totalTokens: { type: Number, default: 0 },
 })
 
-defineEmits(['close', 'retry', 'delete'])
+const emit = defineEmits(['close', 'retry', 'delete', 'delete-user', 'log'])
 
-const shortPath = computed(() => {
-  if (!props.project.folder_name) return '—'
-  return props.project.folder_name.split('/').filter(Boolean).slice(-2).join('/')
+function getUserAvatarId(userId) {
+  const u = props.userMap[userId]
+  return u?.user_avatar_id ?? 1
+}
+
+const userName = computed(() => {
+  if (!props.project) return ''
+  return Object.entries(props.userMap).find(([uid]) => uid === props.project.user_id)?.[1]?.name || '?'
 })
 
-const statusLabel = computed(() => {
-  const p = props.project
-  if (p.is_finished === 0) return '活跃'
-  if (p.status === 0) return '完成'
-  const labels = { 1: 'API', 2: '超限', 3: '超时', 4: 'JSON', 5: '异常' }
-  return labels[p.status] || '未知'
-})
+function getStatusLabel() {
+  if (!props.project) return '—'
+  if (!props.project.is_finished) return '活跃'
+  if (props.project.status === 0) return '完成'
+  return '失败'
+}
 
-const statusClass = computed(() => {
-  const p = props.project
-  if (p.is_finished === 0) return 'active'
-  if (p.status === 0) return 'active'
+function getStatusClass() {
+  if (!props.project) return 'failed'
+  if (!props.project.is_finished) return 'running'
+  if (props.project.status === 0) return 'active'
   return 'failed'
-})
+}
 
-const sid = computed(() => {
-  if (!props.project.session_id) return '—'
-  return props.project.session_id.substring(0, 16) + '...'
-})
+const statusLabel = computed(getStatusLabel)
+const statusClass = computed(getStatusClass)
 
-const replyText = computed(() => {
-  if (!props.project.claude_result) return ''
+const replyText = computed(() => props.project?.claude_output || '')
+
+function parseModalData(prop) {
+  if (!props.project) return null
   try {
     const cr = typeof props.project.claude_result === 'string'
       ? JSON.parse(props.project.claude_result)
       : props.project.claude_result
-    return cr.result || cr.output || ''
-  } catch { return '' }
-})
-
-const turns = computed(() => {
-  if (!props.project.claude_result) return null
-  try {
-    const cr = typeof props.project.claude_result === 'string'
-      ? JSON.parse(props.project.claude_result)
-      : props.project.claude_result
-    return cr.num_turns ?? null
+    return cr[prop] ?? null
   } catch { return null }
-})
+}
 
-const cost = computed(() => {
-  if (!props.project.claude_result) return null
-  try {
-    const cr = typeof props.project.claude_result === 'string'
-      ? JSON.parse(props.project.claude_result)
-      : props.project.claude_result
-    return cr.total_cost_usd ?? null
-  } catch { return null }
+const turns = computed(() => parseModalData('num_turns'))
+const duration = computed(() => parseModalData('duration_ms'))
+
+const formattedDuration = computed(() => {
+  if (duration.value == null) return '—'
+  const s = Math.round(duration.value / 1000)
+  const h = String(Math.floor(s / 3600)).padStart(2, '0')
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+  const sec = String(s % 60).padStart(2, '0')
+  return `${h}:${m}:${sec}`
 })
 
 function dateStr(ts) {
-  return new Date(ts * 1000).toLocaleString('zh-CN')
+  return new Date(ts * 1000).toLocaleString()
+}
+
+function fmtToken(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n)
 }
 </script>

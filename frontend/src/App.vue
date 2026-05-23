@@ -32,9 +32,10 @@
                 </div>
               </div>
             </div>
-            <div class="card-actions">
+            <div class="card-actions card-actions-center">
               <button class="btn btn-default" @click="openModalFromSelected">详情</button>
-              <button class="btn btn-default" @click="handleRetry"
+              <button class="btn btn-default" @click="openLogModal">日志</button>
+              <button class="btn btn-continue" @click="handleRetry"
                 :disabled="sending || !canRetry(selectedProject)">
                 重试
               </button>
@@ -43,7 +44,7 @@
           </div>
           <div v-else class="left-bottom-empty">
             <div class="empty-icon">⬡</div>
-            <div>选择对接人和项目后<br>在此显示详情</div>
+            <div>选择 User 和 Project 后<br>在此显示详情</div>
           </div>
         </div>
       </div>
@@ -58,82 +59,32 @@
           <ProjectCard v-for="p in allProjects" :key="p.project_id"
             :project="p"
             :selected="modalProject?.project_id === p.project_id"
-            @select="handleSelect" />
+            @select="handleSelect"
+            @context="handleSelectByCard" />
         </div>
       </div>
     </div>
 
     <!-- Detail Modal -->
-    <div v-if="modalProject" class="modal-overlay" @click.self="closeModal">
-      <div class="modal">
-        <div class="modal-header">
-          <div class="modal-header-left">
-            <div class="modal-user-row">
-              <div class="modal-avatar-block modal-avatar-user">
-                <img class="modal-avatar-img"
-                  :src="avatarUrl(getUserAvatarId(modalProject.user_id), 'user')"
-                  :width="60" :height="60" :title="modalUserName" />
-              </div>
-              <span class="modal-avatar-label">{{ modalUserName }}</span>
-              <span class="modal-arrow">→</span>
-              <div class="modal-avatar-block modal-avatar-project">
-                <img class="modal-avatar-img"
-                  :src="avatarUrl(modalProject.session_avatar_id, 'session')"
-                  :width="60" :height="60" :title="modalProject.folder_name" />
-              </div>
-              <span class="modal-avatar-label">{{ modalProject.folder_name }}</span>
-            </div>
-            <div class="modal-meta-line">
-              <span class="modal-meta-label">Session</span>
-              <span>{{ modalProject.session_id || '—' }}</span>
-            </div>
-          </div>
-          <div class="modal-header-right">
-            <span class="status-badge modal-status-header" :class="modalStatusClass">{{ modalStatusLabel }}</span>
-            <span v-if="modalProject.retries > 0" class="retries-badge">({{ modalProject.retries }}次重试)</span>
-            <button class="btn-close" @click="closeModal">✕</button>
-          </div>
-        </div>
-        <div class="modal-header-divider"></div>
+    <DetailModal
+      v-if="modalProject"
+      :project="modalProject"
+      :sending="sending"
+      :user-map="userMap"
+      :total-tokens="modalTotalTokens"
+      @close="closeModal"
+      @retry="handleRetry"
+      @delete="handleDelete"
+      @log="openLogModal"
+      @delete-user="handleDeleteUser"
+    />
 
-        <div class="modal-body">
-          <div class="detail-panels">
-            <div class="detail-panel detail-panel-left" :class="{ failed: modalProject.status && modalProject.status > 0 }">
-              <div class="detail-label">Message</div>
-              <div class="detail-text">{{ modalProject.user_input || '—' }}</div>
-            </div>
-            <div class="detail-panel detail-panel-right" :class="{ failed: modalProject.status && modalProject.status > 0 }">
-              <div class="detail-label">Reply</div>
-              <div v-if="modalReplyText" :class="['detail-text', 'reply', { 'reply-running': !modalProject.is_finished }]">{{ modalReplyText }}</div>
-              <div v-if="modalProject.error" class="detail-text error">{{ modalProject.error }}</div>
-              <div v-if="!modalReplyText && !modalProject.error" class="detail-text">—</div>
-            </div>
-          </div>
-
-          <div class="detail-meta">
-            <div>
-              <span>创建: {{ modalDateStr(modalProject.created_at) }}</span>
-              <span v-if="modalTurns != null">  轮次: {{ modalTurns }}</span>
-            </div>
-            <div>
-              <span>更新: {{ modalDateStr(modalProject.updated_at) }}</span>
-              <span>  用时: {{ modalFormattedDuration }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <div class="modal-footer-left" v-if="modalTotalTokens > 0">总token: {{ modalTotalTokens >= 1000000 ? Math.floor(modalTotalTokens / 1000000) + 'M' : fmtToken(modalTotalTokens) }}</div>
-          <div class="modal-footer-right">
-            <button class="btn-continue" @click="handleRetry"
-              :disabled="sending || !canRetry(modalProject)">
-              {{ sending ? '发送中...' : '重试 ▶' }}
-            </button>
-            <button class="btn-delete" @click="handleDelete">删除</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Log Modal -->
+    <LogModal
+      v-if="showLogModal"
+      :project-id="logProjectId"
+      @close="showLogModal = false"
+    />
   </div>
 
   <!-- Toast -->
@@ -154,10 +105,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, reactive } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import * as api from './api/index.js'
 import SendForm from './components/SendForm.vue'
 import ProjectCard from './components/ProjectCard.vue'
+import DetailModal from './components/DetailModal.vue'
+import LogModal from './components/LogModal.vue'
 import { avatarUrl } from './utils/avatar.js'
 
 // ── State ──
@@ -171,7 +124,8 @@ const formRef = ref(null)
 const confirmDialog = ref(null) // { message, onConfirm, label }
 const toast = ref(null) // { msg, type }
 const currentUserId = ref('') // 跟踪当前表单选中的 user_id
-const pollTimer = null
+const showLogModal = ref(false)
+const logProjectId = ref('')
 
 // ── Computed ──
 const sortedProjects = computed(() => {
@@ -179,69 +133,12 @@ const sortedProjects = computed(() => {
 })
 const allProjects = sortedProjects
 
-const modalUserName = computed(() => {
-  if (!modalProject.value) return ''
-  return Object.entries(userMap.value).find(([uid]) => uid === modalProject.value.user_id)?.[1]?.name || '?'
-})
-const modalShortPath = computed(() => {
-  if (!modalProject.value) return ''
-  return modalProject.value.folder_name?.split('/').filter(Boolean).slice(-2).join('/') || '—'
-})
-const modalReplyText = computed(() => {
-  if (!modalProject.value) return ''
-  return getModalReplyText(modalProject.value)
-})
-const modalStatusLabel = computed(() => {
-  return getThumbStatusLabel(modalProject.value)
-})
-const modalStatusClass = computed(() => {
-  return getThumbStatusClass(modalProject.value)
-})
-const modalTurns = computed(() => {
-  if (!modalProject.value) return null
-  try {
-    const cr = typeof modalProject.value.claude_result === 'string'
-      ? JSON.parse(modalProject.value.claude_result)
-      : modalProject.value.claude_result
-    return cr.num_turns ?? null
-  } catch { return null }
-})
-const modalDuration = computed(() => {
-  if (!modalProject.value) return null
-  try {
-    const cr = typeof modalProject.value.claude_result === 'string'
-      ? JSON.parse(modalProject.value.claude_result)
-      : modalProject.value.claude_result
-    return cr.duration_ms ?? null
-  } catch { return null }
-})
-const modalCost = computed(() => {
-  if (!modalProject.value) return null
-  try {
-    const cr = typeof modalProject.value.claude_result === 'string'
-      ? JSON.parse(modalProject.value.claude_result)
-      : modalProject.value.claude_result
-    return cr.cost_usd ?? null
-  } catch { return null }
-})
 const modalTotalTokens = computed(() => {
   if (!modalProject.value) return 0
   return (modalProject.value.total_inputTokens || 0) + (modalProject.value.total_outputTokens || 0)
 })
-const modalFormattedDuration = computed(() => {
-  if (modalDuration.value == null) return '—'
-  const s = Math.round(modalDuration.value / 1000)
-  const h = String(Math.floor(s / 3600)).padStart(2, '0')
-  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
-  const sec = String(s % 60).padStart(2, '0')
-  return `${h}:${m}:${sec}`
-})
 
 // ── Helpers ──
-function getUserAvatarId(userId) {
-  const u = userMap.value[userId]
-  return u?.user_avatar_id ?? 1
-}
 function getModalReplyText(p) {
   if (!p?.claude_output) return ''
   return p.claude_output
@@ -261,22 +158,6 @@ function getThumbStatusClass(p) {
 function canRetry(p) {
   if (!p) return false
   return p.is_finished === 1 && p.status > 0
-}
-function modalDateStr(ts) {
-  return new Date(ts * 1000).toLocaleString()
-}
-function fmtToken(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return String(n)
-}
-function fmtDuration(ms) {
-  if (ms == null) return null
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  if (m > 0) return `${m}分${sec}秒`
-  return `${sec}秒`
 }
 
 // ── Actions ──
@@ -305,6 +186,14 @@ function handleSelect(p) {
 function handleSelectByDir(dir) {
   // form.dir 已在 pickDir 中设置，watch 会自动触发，这里不需要额外操作
 }
+function handleSelectByCard(p) {
+  // 双击右侧卡片 → 更新左侧用户/项目卡片
+  const u = Object.entries(userMap.value).find(([uid]) => uid === p.user_id)?.[1]
+  if (u) {
+    formRef.value.form.user = u.name
+    formRef.value.form.dir = p.folder_name
+  }
+}
 
 async function handleSend() {
   if (sending.value) return
@@ -313,9 +202,6 @@ async function handleSend() {
 
   sending.value = true
   formRef.value.form.message = ''
-
-  // 停止旧的轮询
-  if (pollTimer.value) { clearInterval(pollTimer.value); pollTimer.value = null }
 
   try {
     const res = await api.sendChat(user, dir, message)
@@ -327,6 +213,12 @@ async function handleSend() {
 
     // 立即刷新一次
     await refreshProjects()
+
+    // 找到新创建的项目并赋给 selectedProject
+    const newProj = projects.value.find(p => p.project_id === project_id)
+    if (newProj) {
+      selectedProject.value = { ...newProj }
+    }
   } catch (err) {
     sending.value = false
     if (err.status === 409) {
@@ -394,6 +286,28 @@ function openModalFromSelected() {
 }
 function closeModal() {
   modalProject.value = null
+}
+function openLogModal(e, proj) {
+  const p = proj || selectedProject.value
+  if (p) {
+    logProjectId.value = p.project_id
+    showLogModal.value = true
+  }
+}
+function handleDeleteUser(proj) {
+  const uid = proj?.user_id
+  if (!uid) return
+  const userName = Object.entries(userMap.value).find(([u]) => u === uid)?.[1]?.name || '?'
+  showConfirm(`确定要删除用户 "${userName}" 及其所有项目吗？`, async () => {
+    try {
+      await api.deleteUser(uid)
+      await refreshProjects()
+      selectedProject.value = null
+      modalProject.value = null
+    } catch (e) {
+      alert('删除用户失败: ' + e.message)
+    }
+  })
 }
 
 // ── Init ──
@@ -595,7 +509,8 @@ body::before {
 .card-text { font-size: 12px; color: var(--text); word-break: break-word; }
 .card-reply-text { font-size: 12px; color: var(--warning); word-break: break-word; }
 .card-reply { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-.card-actions { display: flex; gap: 6px; margin-top: 4px; }
+.card-actions { display: flex; gap: 6px; margin-top: 4px; justify-content: center; }
+.card-actions-center { display: flex; gap: 6px; margin-top: 4px; justify-content: center; }
 .btn {
   display: inline-flex;
   align-items: center;
@@ -729,6 +644,9 @@ body::before {
   min-height: 12px;
   word-break: break-all;
 }
+.thumb-reply-running {
+  color: var(--warning);
+}
 .thumb-bottom {
   padding: 4px 8px 8px;
   font-size: 9px;
@@ -740,14 +658,6 @@ body::before {
   background: rgba(255, 255, 255, 0.04);
   border-radius: 4px;
 }
-.project-thumb.loading-pulse {
-  animation: pulse 1.5s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
 /* Toast */
 .toast {
   position: fixed;
@@ -826,15 +736,11 @@ body::before {
   align-items: center;
   gap: 12px;
   margin-bottom: 20px;
-  position: relative;
-}
-.modal-header-left { flex: 1; }
-.modal-header-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 0;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
 }
 .modal-header-right { display: flex; align-items: center; gap: 8px; }
+.modal-header-left { flex: 1; }
 .modal-user-row { display: flex; align-items: center; gap: 4px; }
 .modal-meta-line {
   font-size: 11px;
@@ -867,14 +773,6 @@ body::before {
   padding: 4px 12px;
   border-radius: 12px;
   font-weight: 600;
-}
-.status-badge.modal-status-header {
-  font-size: 20px;
-  padding: 0;
-  border-radius: 0;
-  font-weight: 600;
-  align-self: flex-start;
-  line-height: 1;
 }
 .status-badge.active { background: rgba(34, 197, 94, 0.15); color: var(--success); }
 .status-badge.running { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
@@ -947,14 +845,6 @@ body::before {
   padding-top: 12px;
 }
 .modal-footer-left { flex: 1; color: var(--text-dim); font-size: 12px; }
-.token-total {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 12px;
-}
-.token-label { font-size: 10px; color: var(--text-dim); display: block; }
-.token-value { font-size: 14px; color: var(--text); font-weight: 600; }
 .modal-footer-right { display: flex; gap: 8px; }
 .btn-continue {
   padding: 6px 16px;
@@ -970,6 +860,12 @@ body::before {
   letter-spacing: 0.2px;
 }
 .btn-continue:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-continue:hover:not(:disabled) {
+  background: #6d28d9;
+}
+.btn-continue:active:not(:disabled) {
+  background: #5b21b6;
+}
 .btn-delete {
   background: #7f1d1d;
   color: white;
@@ -984,6 +880,22 @@ body::before {
   letter-spacing: 0.2px;
 }
 .btn-delete:hover:not(:disabled) {
+  background: #991b1b;
+}
+.btn-delete-all {
+  background: #7f1d1d;
+  color: white;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.2px;
+}
+.btn-delete-all:hover:not(:disabled) {
   background: #991b1b;
 }
 

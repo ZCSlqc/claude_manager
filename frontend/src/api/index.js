@@ -45,3 +45,11 @@ export async function updateProject(id, fields) {
 export async function deleteProject(id) {
   return (await fetch(`${API}/projects/${id}`, { method: 'DELETE' })).json()
 }
+
+export async function getClaudeLog(projectId) {
+  return (await fetch(`${API}/api/claude-log/${projectId}`)).json()
+}
+
+export async function deleteUser(userId) {
+  return (await fetch(`${API}/users/${userId}`, { method: 'DELETE' })).json()
+}

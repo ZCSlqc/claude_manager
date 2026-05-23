@@ -73,9 +73,16 @@ async def _run_claude(project_id: str, dir_path: str, message: str, session_id: 
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            update_project(project_id, subprocess_pid=0, claude_result=json.dumps({"error": "timeout"}, ensure_ascii=False), is_finished=1, status=4)
-            logger.info(f"[CALLBACK] success=False project_id={project_id} msg=TIMEOUT")
-            logger.error(f"[{prefix}] FAIL :status=4(TIMEOUT)")
+            error = f"TIMEOUT {SUBPROCESS_TIMEOUT}s"
+            result = {"duration_ms":SUBPROCESS_TIMEOUT*1000,"num_turns":0,"result":error}
+            update_project(project_id,
+                           subprocess_pid=0,
+                           claude_output=error,
+                           claude_result=json.dumps(result, ensure_ascii=False),
+                           status=4,
+                           is_finished=1)
+            logger.info(f"[CALLBACK] success=False project_id={project_id} msg={error}")
+            logger.exception(f"[{prefix}] FAIL :status=4({error})")
             return
 
         update_project(project_id, subprocess_pid=0)
@@ -83,9 +90,15 @@ async def _run_claude(project_id: str, dir_path: str, message: str, session_id: 
         try:
             jr = json.loads(stdout or "{}")
         except json.JSONDecodeError:
-            update_project(project_id, claude_result=json.dumps({"error": "invalid json"}, ensure_ascii=False), is_finished=1, status=5)
-            logger.info(f"[CALLBACK] success=False project_id={project_id} msg=json_parse_fail")
-            logger.error(f"[{prefix}] FAIL :status=5(JSON parse fail) stdout={repr(stdout[:200])}")
+            error = "JSON PARSE FAIL"
+            result = {"duration_ms":SUBPROCESS_TIMEOUT*1000,"num_turns":0,"result":error}
+            update_project(project_id,
+                           claude_output=error,
+                           claude_result=json.dumps(result, ensure_ascii=False),
+                           status=4,
+                           is_finished=1)
+            logger.info(f"[CALLBACK] success=False project_id={project_id} msg={error}")
+            logger.exception(f"[{prefix}] FAIL :status=5({error}) stdout={repr(stdout[:200])}")
             return
 
         usage = jr.get("usage", {})
@@ -108,7 +121,6 @@ async def _run_claude(project_id: str, dir_path: str, message: str, session_id: 
 
         update_project(
             project_id,
-            session_id=jr.get("session_id", ""),
             claude_output=jr.get("result", ""),
             claude_result=json.dumps(jr, ensure_ascii=False),
             status=status,
@@ -127,10 +139,17 @@ async def _run_claude(project_id: str, dir_path: str, message: str, session_id: 
             logger.info(f"[CALLBACK] success=Flase project_id={project_id} result={repr(result[:200])}")
 
     except Exception as e:
-        logger.exception(f"[{prefix}] FAIL :status=5(async crash)")
-        logger.info(f"[CALLBACK] success=False project_id={project_id} msg={e}")
-        update_project(project_id, subprocess_pid=0, is_finished=1, status=5)
-
+        error = "ASYNC CRASH"
+        result = {"duration_ms":SUBPROCESS_TIMEOUT*1000,"num_turns":0,"result":error}
+        update_project(project_id,
+                        subprocess_pid=0,
+                        claude_output=error,
+                        claude_result=json.dumps(result, ensure_ascii=False),
+                        status=5,
+                        is_finished=1)
+        logger.info(f"[CALLBACK] success=False project_id={project_id} msg={error}")
+        logger.exception(f"[{prefix}] FAIL :status=5({error})")
+    
 
 @router.post("/api/claude")
 async def api_claude(req: ClaudeRequest):
@@ -215,7 +234,8 @@ async def api_retry(project_id: str):
 
         session_id = project.get("session_id", "")
         dir_path = project.get("folder_name", "")
-        message = project.get("user_input", "") + "\n继续完成未完成的内容。"
+        old_msg =  project.get("user_input", "")
+        message = old_msg + "\n继续完成未完成的内容。"
         status = project.get("status", "")
         if status == 0:
             raise HTTPException(400, "项目已经执行成功，不需要重试")
@@ -226,7 +246,7 @@ async def api_retry(project_id: str):
         if project.get("is_finished", 1) == 0:
             raise HTTPException(409, f"session 使用中，请勿重复发送 (project_id={project_id})")
 
-        update_project(project_id, is_finished=0, user_input=message)
+        update_project(project_id, is_finished=0)
         asyncio.create_task(
             _run_claude(project_id, dir_path, message, session_id),
             name=f"retry-{project_id[:8]}",
@@ -239,4 +259,27 @@ async def api_retry(project_id: str):
     except Exception as e:
         logger.exception(f"[API] error: {e}")
         raise HTTPException(500, f"内部错误: {e}")
+
+
+@router.get("/api/claude-log/{project_id}")
+async def api_claude_log(project_id: str):
+    """获取项目对应的 Claude session JSONL 日志文件内容。"""
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(404, f"项目不存在: {project_id}")
+
+    session_id = project.get("session_id", "")
+    claude_path = project.get("claude_path", "")
+    if not session_id or not claude_path:
+        return _ok(200, {"log_content": ""})
+
+    log_file = Path(claude_path) / (session_id + ".jsonl")
+    if not log_file.is_file():
+        return _ok(200, {"log_content": ""})
+
+    raw = log_file.read_text(encoding="utf-8", errors="replace")
+    lines = raw.split('\n')
+    # 只返回最后 40 行
+    content = '\n'.join(lines[-40:]) if len(lines) > 40 else raw
+    return _ok(200, {"log_content": content, "log_file": log_file.name})
 
