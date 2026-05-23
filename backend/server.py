@@ -19,7 +19,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -85,18 +85,59 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def wrap_response(request: Request, call_next):
+    """统一响应格式: {success, code, data, msg}"""
+    from fastapi.responses import JSONResponse
+
+    response = await call_next(request)
+
+    # 跳过静态文件、头像等非 JSON 响应
+    if response.media_type and response.media_type not in ("application/json", "text/json"):
+        return response
+
+    # 读取原始 body
+    body_bytes = b"".join([c async for c in response.body_iterator])
+    original = None
+    if body_bytes:
+        try:
+            original = json.loads(body_bytes)
+        except json.JSONDecodeError:
+            pass
+
+    if original is None:
+        # 无法解析的 body 原样返回
+        return JSONResponse(
+            content={"success": False, "code": response.status_code, "data": {}, "msg": ""}
+        )
+
+    if response.status_code == 200:
+        return JSONResponse(
+            content={"success": True, "code": 200, "data": original, "msg": ""}
+        )
+    elif response.status_code == 409:
+        return JSONResponse(
+            content={
+                "success": False,
+                "code": 409,
+                "data": original if isinstance(original, dict) else {},
+                "msg": original.get("error", "") if isinstance(original, dict) else "",
+            }
+        )
+    else:
+        return JSONResponse(
+            content={"success": False, "code": response.status_code, "data": {}, "msg": ""}
+        )
+
+
 # ── 核心: 解析 Claude JSON ───────────────────────────────
 
 _CLAUDE_CMD = [
     "claude",
-    "--dangerously-skip-permissions",
     "-p",
+    "--dangerously-skip-permissions",
     "--output-format", "json",
 ]
-
-# ── 异步调度状态 ─────────────────────────────────────────
-# 防止同一项目并发发送: project_id -> bool
-_busy_locks: dict[str, bool] = {}
 
 
 def _parse_claude_json(stdout: str) -> dict:
@@ -131,11 +172,8 @@ def _determine_status(parsed: dict) -> int:
         3 - 进程异常（超时 kill / 意外死亡，由 _run_claude_async / PID checker 处理）
         4 - 系统异常（JSON 解析失败 / 会话创建失败 / 未知 Python 异常兜底）
     """
-    # /new 或 /clear 清空上下文 → 完成
-    if parsed["stop_reason"] is None and parsed["output"] == "" and parsed["num_turns"] == 0:
-        return 0
     # 正常完成
-    if parsed["subtype"] == "success" and not parsed["is_error"] and parsed["stop_reason"] in ("end_turn", None):
+    if parsed["subtype"] == "success" and not parsed["is_error"] and parsed["stop_reason"] == "end_turn":
         return 0
     # API 临时错误
     if parsed["subtype"] == "success" and parsed["is_error"] and parsed["stop_reason"] == "stop_sequence":
@@ -150,9 +188,6 @@ def _determine_status(parsed: dict) -> int:
 async def _get_claude_sessionid(dir_path: str, message: str = "你好", timeout: int = 120) -> str:
     """异步执行 Claude 创建/获取 session_id。发一条短消息，解析返回的 session_id。"""
     cmd = list(_CLAUDE_CMD)
-    if not cmd[-1] == "--output-format":  # 确保 --output-format 和 json 已经配对
-        cmd.extend(["--output-format", "json"])
-    # _CLAUDE_CMD 已经是 [..., "--output-format", "json"]，不需要再追加
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -170,102 +205,6 @@ async def _get_claude_sessionid(dir_path: str, message: str = "你好", timeout:
         return ""
 
 
-def _run_claude_sync(message: str, project_dir: str, session_id: str | None = None, project_id: str | None = None, max_turns: int | None = None) -> dict:
-    """同步执行 claude subprocess。返回 {success, output, error, parsed, raw_stdout}。
-
-    时序：创建进程 → 立即 PID 写 DB → communicate → 解析
-    """
-    cmd = list(_CLAUDE_CMD)
-    if session_id:
-        cmd.extend(["--resume", session_id])
-    if max_turns is not None:
-        cmd.extend(["--max-turns", str(max_turns)])
-    cmd.append(message)
-
-    session_label = "resume" if session_id else "new"
-    max_turns_label = f"limit:{max_turns}" if max_turns else "unlimited"
-    logger.info(f'claude | session={session_label} max_turns={max_turns_label} dir={project_dir} msg="{message[:80]}"')
-
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=project_dir
-    )
-    pid = proc.pid
-
-    # 立即写 PID 到 DB（进程正在运行中，周期性检测器能抓到）
-    if project_id:
-        database.update_project(project_id, subprocess_pid=pid)
-
-    # 超时处理
-    try:
-        stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        logger.error(f'claude | TIMEOUT after {SUBPROCESS_TIMEOUT}s | session={session_id or "new"} pid={pid}')
-        return {
-            "success": False,
-            "output": "",
-            "error": f"Timeout after {SUBPROCESS_TIMEOUT}s (returncode={proc.returncode})",
-            "pid": pid,
-            "parsed": {"full": {}},
-            "raw_stdout": "",
-        }
-
-    raw_stdout = stdout
-
-    # JSON 解析失败
-    try:
-        parsed = _parse_claude_json(raw_stdout)
-    except Exception:
-        return {
-            "success": False,
-            "output": "",
-            "error": "stdout JSON 解析失败",
-            "pid": pid,
-            "parsed": {"full": {}},
-            "raw_stdout": raw_stdout[:500],
-        }
-
-    if parsed["is_error"]:
-        logger.error(f'claude | error after {time.time():.1f}s | session={parsed["session_id"]} subtype={parsed["subtype"]}')
-    else:
-        logger.info(f'claude | OK | session={parsed["session_id"]} turns={parsed["num_turns"]}')
-
-    return {
-        "success": True,
-        "output": parsed["output"],
-        "error": None,
-        "pid": pid,
-        "parsed": parsed,
-        "raw_stdout": raw_stdout,
-    }
-
-
-def _auto_retry(dir_path: str, session_id: str, status: int) -> tuple[bool, str]:
-    """自动自愈。返回 (成功, 新输出)。结果不入库。"""
-    retry_messages = {
-        1: "Don't read too much once, continue your work.",
-        2: "Continue.",
-    }
-    # 仅 API 错误(1) 和轮次超限(2) 可重试；3(进程异常)、4(系统异常) 不可重试
-    msg = retry_messages.get(status)
-    if not msg:
-        return False, ""
-
-    logger.warning(f"auto-retry: status={status}, msg=\"{msg}\"")
-
-    cmd = list(_CLAUDE_CMD)
-    cmd.extend(["--resume", session_id])
-    cmd.append(msg)
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=dir_path, timeout=SUBPROCESS_TIMEOUT)
-        stdout = result.stdout
-        parsed = _parse_claude_json(stdout)
-        return True, parsed["output"]
-    except Exception as e:
-        logger.error(f"auto-retry failed: {e}")
-        return False, ""
 
 
 # ── 后台: 周期性 PID 健康检测 ─────────────────────────────
@@ -310,12 +249,10 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
     """异步执行 Claude：创建进程 → 写 PID → await communicate → 解析写 DB。"""
     try:
         cmd = list(_CLAUDE_CMD)
-        if session_id:
-            cmd.extend(["--resume", session_id])
+        cmd.extend(["--resume", session_id])
         cmd.append(message)
 
-        session_label = "resume" if session_id else "new"
-        logger.info(f'claude | session={session_label} dir={dir_path} msg="{message[:80]}"')
+        logger.info(f'claude | session=resume dir={dir_path} msg="{message[:80]}"')
 
         # 创建子进程 → 当场拿 PID
         proc = await asyncio.create_subprocess_exec(
@@ -377,16 +314,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
         prev_input = current.get("total_inputTokens", 0) if current else 0
         prev_output = current.get("total_outputTokens", 0) if current else 0
 
-        # 自动自愈：仅 1(API错误) 和 2(轮次超限) 可重试
-        retries_done = 0
-        if status in (1, 2) and parsed.get("session_id"):
-            retry_success, _ = _auto_retry(dir_path, parsed["session_id"], status)
-            if retry_success:
-                retries_done = 1
-
         final_status = 0 if not parsed.get("is_error") else status
-        if status in (1, 2) and retries_done == 0:
-            final_status = status
 
         database.update_project(
             project_id,
@@ -415,8 +343,6 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
             is_finished=1,
             status=4,  # 系统异常兜底
         )
-    finally:
-        _busy_locks.pop(project_id, None)
 
 
 @app.post("/api/claude")
@@ -450,8 +376,6 @@ async def _internal_claude(req: InternalRequest):
         project = database.get_project_by_path(user_id, dir_path)
         if not project:
             project = database.add_project(user_id, dir_path)
-            if "error" in project:
-                project = database.get_project_by_path(user_id, dir_path)
 
         if not project or "error" in project:
             raise HTTPException(500, f"项目处理失败: {project.get('error', '')}")
@@ -465,25 +389,16 @@ async def _internal_claude(req: InternalRequest):
             Path(dir_path).mkdir(parents=True, exist_ok=True)
             logger.info(f"mkdir | created project dir: {dir_path}")
 
-        # ── 步骤 4: 并发保护 ──
-        if _busy_locks.get(project_id):
-            raise HTTPException(409, {"status": "failed", "error": "session 使用中，请勿重复发送"})
-
         if is_finished == 0 and project.get("subprocess_pid", 0) > 0:
-            _busy_locks[project_id] = True
             raise HTTPException(
                 409,
                 {"status": "failed", "error": "session 使用中，请勿重复发送", "retries": 0},
             )
 
-        # 标记为忙碌
-        _busy_locks[project_id] = True
-
         # ── 步骤 5: 首次创建 session（如果还没有） ──
         if not session_id:
             new_sid = await _get_claude_sessionid(dir_path, "你好")
             if not new_sid:
-                _busy_locks.pop(project_id, None)
                 raise HTTPException(500, "无法创建会话：未拿到 session_id")
 
             # 只更新 session_id，不再标记 is_finished，避免前端误判为"已完成"
@@ -600,8 +515,8 @@ def delete_project_endpoint(project_id: str):
 
 
 @app.post("/continue/{project_id}")
-def continue_project(project_id: str):
-    """向指定项目发送 Continue.（resume 方式）。"""
+async def continue_project(project_id: str):
+    """向指定项目发送 Continue.（异步启动，立即返回）。"""
     project = database.get_project(project_id)
     if not project:
         raise HTTPException(404, f"项目不存在: {project_id}")
@@ -610,27 +525,13 @@ def continue_project(project_id: str):
     if not session_id:
         raise HTTPException(400, "项目没有活跃的 session_id")
 
-    result = _run_claude_sync(
-        message="Continue.",
-        project_dir=project["folder_name"],
-        session_id=session_id,
-        project_id=project_id,
+    # 异步执行，不阻塞
+    asyncio.create_task(
+        _run_claude_project(project_id, project["folder_name"], "Continue.", session_id),
+        name=f"continue-{project_id[:8]}",
     )
 
-    if result["success"] and result["parsed"]["full"]:
-        database.update_project(
-            project_id,
-            claude_result=json.dumps(result["parsed"]["full"], ensure_ascii=False),
-            is_finished=1,
-            status=_determine_status(result["parsed"]),
-        )
-
-    return {
-        "project_id": project_id,
-        "status": "success" if result["success"] else "failed",
-        "output": result["output"],
-        "error": result["error"],
-    }
+    return {"project_id": project_id, "status": "started"}
 
 
 # ── Heartbeat ─────────────────────────────────────────────
