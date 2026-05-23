@@ -12,7 +12,6 @@ import os
 import random
 import subprocess
 import sys
-import threading
 import re
 import time
 from pathlib import Path
@@ -54,7 +53,7 @@ logger.add(
 )
 
 # ── 配置 ──────────────────────────────────────────────────
-SUBPROCESS_TIMEOUT = 3600
+SUBPROCESS_TIMEOUT = 900
 MAX_RETRIES = 1
 PID_CHECK_INTERVAL = 60
 
@@ -123,8 +122,16 @@ def _parse_claude_json(stdout: str) -> dict:
 
 
 def _determine_status(parsed: dict) -> int:
-    """根据 Claude 返回的 JSON 推断 status 值。"""
-    # /new 或 /clear 清空上下文
+    """根据 Claude 返回的 JSON 推断 status 值。
+
+    状态定义：
+        0 - 完成（正常结束）
+        1 - API 错误（claude 返回了 is_error）
+        2 - 轮次超限（max_turns 耗尽）
+        3 - 进程异常（超时 kill / 意外死亡，由 _run_claude_async / PID checker 处理）
+        4 - 系统异常（JSON 解析失败 / 会话创建失败 / 未知 Python 异常兜底）
+    """
+    # /new 或 /clear 清空上下文 → 完成
     if parsed["stop_reason"] is None and parsed["output"] == "" and parsed["num_turns"] == 0:
         return 0
     # 正常完成
@@ -136,10 +143,11 @@ def _determine_status(parsed: dict) -> int:
     # max_turns 超限
     if parsed["subtype"] == "error_max_turns" and parsed["is_error"] and parsed["stop_reason"] == "tool_use":
         return 2
+    # 其他 Claude 返回的错误 → 归入 4（系统异常）
     return 4
 
 
-def _run_claude_sync(message: str, project_dir: str, session_id: str | None = None, project_id: str | None = None) -> dict:
+def _run_claude_sync(message: str, project_dir: str, session_id: str | None = None, project_id: str | None = None, max_turns: int | None = None) -> dict:
     """同步执行 claude subprocess。返回 {success, output, error, parsed, raw_stdout}。
 
     时序：创建进程 → 立即 PID 写 DB → communicate → 解析
@@ -147,9 +155,13 @@ def _run_claude_sync(message: str, project_dir: str, session_id: str | None = No
     cmd = list(_CLAUDE_CMD)
     if session_id:
         cmd.extend(["--resume", session_id])
+    if max_turns is not None:
+        cmd.extend(["--max-turns", str(max_turns)])
     cmd.append(message)
 
-    logger.info(f'claude | session={"resume" if session_id else "new"} dir={project_dir} msg="{message[:80]}"')
+    session_label = "resume" if session_id else "new"
+    max_turns_label = f"limit:{max_turns}" if max_turns else "unlimited"
+    logger.info(f'claude | session={session_label} max_turns={max_turns_label} dir={project_dir} msg="{message[:80]}"')
 
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=project_dir
@@ -211,9 +223,8 @@ def _auto_retry(dir_path: str, session_id: str, status: int) -> tuple[bool, str]
     retry_messages = {
         1: "Don't read too much once, continue your work.",
         2: "Continue.",
-        3: "Too much time, give me a summary of what you have done.",
-        4: "Repeat what you have done.",
     }
+    # 仅 API 错误(1) 和轮次超限(2) 可重试；3(进程异常)、4(系统异常) 不可重试
     msg = retry_messages.get(status)
     if not msg:
         return False, ""
@@ -253,11 +264,11 @@ async def _periodic_pid_checker():
                 try:
                     os.kill(pid, 0)
                 except ProcessLookupError:
-                    # 进程已死 → 标记 status=5
+                    # 进程已死 → status=3（进程异常）
                     database.update_project(
                         row["project_id"],
                         is_finished=1,
-                        status=5,
+                        status=3,
                         subprocess_pid=0,
                     )
                     logger.warning(
@@ -272,42 +283,66 @@ async def _periodic_pid_checker():
 
 # ── 内部路由: 实际业务逻辑 ─────────────────────────────
 
-def _run_claude_async(project_id: str, dir_path: str, message: str, session_id: str | None):
-    """后台线程：执行 Claude 调用并更新 DB。"""
+async def _run_claude_project(project_id: str, dir_path: str, message: str, session_id: str | None):
+    """异步执行 Claude：创建进程 → 写 PID → await communicate → 解析写 DB。"""
     try:
-        result = _run_claude_sync(
-            message=message,
-            project_dir=dir_path,
-            session_id=session_id,
-            project_id=project_id,
+        cmd = list(_CLAUDE_CMD)
+        if session_id:
+            cmd.extend(["--resume", session_id])
+        cmd.append(message)
+
+        session_label = "resume" if session_id else "new"
+        logger.info(f'claude | session={session_label} dir={dir_path} msg="{message[:80]}"')
+
+        # 创建子进程 → 当场拿 PID
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            text=True,
+            cwd=dir_path,
         )
+        pid = proc.pid
 
-        # 进程已结束，重置 PID
-        database.update_project(project_id, subprocess_pid=0)
+        # PID 立即入库，进程正在跑
+        database.update_project(project_id, subprocess_pid=pid)
 
-        # 超时
-        if not result["success"] and "Timeout" in result.get("error", ""):
+        # 异步等待，最多 900 秒
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=SUBPROCESS_TIMEOUT
+            )
+        except (asyncio.TimeoutError, subprocess.TimeoutExpired):
+            proc.kill()
+            await proc.wait()
+            database.update_project(project_id, subprocess_pid=0)
             database.update_project(
                 project_id,
                 claude_result=json.dumps({"error": "timeout"}, ensure_ascii=False),
                 is_finished=1,
-                status=3,
+                status=3,  # 进程异常
             )
             logger.error(f"async timeout: project={project_id}")
             return
 
-        # JSON 解析失败
-        if not result["parsed"]["full"] and result["error"] == "stdout JSON 解析失败":
+        # PID 已退出，重置
+        database.update_project(project_id, subprocess_pid=0)
+        raw_stdout = stdout
+
+        # JSON 解析失败 → status=4（系统异常）
+        try:
+            parsed = _parse_claude_json(raw_stdout)
+        except Exception:
             database.update_project(
                 project_id,
-                claude_result=json.dumps({"raw": result["raw_stdout"]}, ensure_ascii=False),
+                claude_result=json.dumps({"raw": raw_stdout[:500]}, ensure_ascii=False),
                 is_finished=1,
                 status=4,
             )
             logger.error(f"async json_parse_fail: project={project_id}")
             return
 
-        parsed = result["parsed"]
+        # 根据 Claude JSON 推断 status
         status = _determine_status(parsed)
 
         # 累加 token（从根级别 usage 读取）
@@ -319,15 +354,15 @@ def _run_claude_async(project_id: str, dir_path: str, message: str, session_id: 
         prev_input = current.get("total_inputTokens", 0) if current else 0
         prev_output = current.get("total_outputTokens", 0) if current else 0
 
-        # 自动自愈
+        # 自动自愈：仅 1(API错误) 和 2(轮次超限) 可重试
         retries_done = 0
-        if status in (1, 2, 3, 4) and parsed.get("session_id"):
+        if status in (1, 2) and parsed.get("session_id"):
             retry_success, _ = _auto_retry(dir_path, parsed["session_id"], status)
             if retry_success:
                 retries_done = 1
 
-        final_status = 0 if not result["error"] else status
-        if status in (1, 2, 3, 4) and retries_done == 0:
+        final_status = 0 if not parsed.get("is_error") else status
+        if status in (1, 2) and retries_done == 0:
             final_status = status
 
         database.update_project(
@@ -355,7 +390,7 @@ def _run_claude_async(project_id: str, dir_path: str, message: str, session_id: 
         database.update_project(
             project_id,
             is_finished=1,
-            status=5,
+            status=4,  # 系统异常兜底
         )
     finally:
         _busy_locks.pop(project_id, None)
@@ -445,13 +480,11 @@ def _internal_claude(req: InternalRequest):
             is_finished=0,
         )
 
-        # 启动后台线程执行 Claude
-        threading.Thread(
-            target=_run_claude_async,
-            args=(project_id, dir_path, message, session_id),
-            daemon=True,
+        # 异步启动 Claude，不阻塞 event loop
+        asyncio.create_task(
+            _run_claude_project(project_id, dir_path, message, session_id),
             name=f"claude-{project_id[:8]}",
-        ).start()
+        )
 
         # 立即返回 project_id
         return {"state": "success", "project_id": project_id}
