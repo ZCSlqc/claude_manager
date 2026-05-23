@@ -42,7 +42,7 @@ function thumbStatusLabel(p) {
   if (p._loading) return '活跃'
   if (p.is_finished === 0) return '活跃'
   if (p.status === 0) return '完成'
-  const labels = { 1: 'API 错误', 2: '轮次超限', 3: '进程异常', 4: '系统异常' }
+  const labels = { 1: 'API 错误', 2: '轮次超限', 3: 'JSON 报错', 4: '进程异常', 5: '系统异常' }
   return labels[p.status] || '未知'
 }
 

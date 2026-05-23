@@ -108,15 +108,39 @@ async def wrap_response(request: Request, call_next):
 from fastapi.exceptions import RequestValidationError
 
 
+def _extract_project_id_from_path(path: str) -> str:
+    """从 URL 路径提取 project_id。"""
+    parts = path.strip("/").split("/")
+    # /projects/{project_id}, /continue/{project_id}, /heartbeat/{project_id},
+    # /projects/{project_id}/xxx, /avatar/{type}/{num}.png
+    idx = parts.index("projects") if "projects" in parts else -1
+    if idx >= 0 and idx + 1 < len(parts):
+        candidate = parts[idx + 1]
+        if len(candidate) == 32:  # UUID hex
+            return candidate
+    idx = parts.index("continue") if "continue" in parts else -1
+    if idx >= 0 and idx + 1 < len(parts):
+        candidate = parts[idx + 1]
+        if len(candidate) == 32:
+            return candidate
+    idx = parts.index("heartbeat") if "heartbeat" in parts else -1
+    if idx >= 0 and idx + 1 < len(parts):
+        candidate = parts[idx + 1]
+        if len(candidate) == 32:
+            return candidate
+    return ""
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """HTTPException → {success: false, code, data: {}, msg: detail}"""
+    """HTTPException → {success: false, code, data: {project_id}, msg: detail}"""
+    project_id = _extract_project_id_from_path(request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
         content={
             "success": False,
             "code": exc.status_code,
-            "data": {},
+            "data": {"project_id": project_id},
             "msg": exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False),
         },
     )
@@ -124,13 +148,14 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """参数校验错误 → {success: false, code: 422, data: {}, msg: ...}"""
+    """参数校验错误 → {success: false, code: 422, data: {project_id}, msg: ...}"""
+    project_id = _extract_project_id_from_path(request.url.path)
     return JSONResponse(
         status_code=422,
         content={
             "success": False,
             "code": 422,
-            "data": {},
+            "data": {"project_id": project_id},
             "msg": str(exc.errors()),
         },
     )
@@ -138,14 +163,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """未捕获异常 → {success: false, code: 500, data: {}, msg: ...}"""
+    """未捕获异常 → {success: false, code: 500, data: {project_id}, msg: ...}"""
     logger.exception(f"unhandled: {request.method} {request.url.path}")
+    project_id = _extract_project_id_from_path(request.url.path)
     return JSONResponse(
         status_code=500,
         content={
             "success": False,
             "code": 500,
-            "data": {},
+            "data": {"project_id": project_id},
             "msg": str(exc),
         },
     )
@@ -190,8 +216,9 @@ def _determine_status(parsed: dict) -> int:
         0 - 完成（正常结束）
         1 - API 错误（claude 返回了 is_error）
         2 - 轮次超限（max_turns 耗尽）
-        3 - 进程异常（超时 kill / 意外死亡，由 _run_claude_async / PID checker 处理）
-        4 - 系统异常（JSON 解析失败 / 会话创建失败 / 未知 Python 异常兜底）
+        3 - 未知 JSON 报错（JSON 可解析，但 Claude 返回了没见过的错误）
+        4 - 进程异常（超时 kill / 意外死亡，由 _run_claude_async / PID checker 处理）
+        5 - 系统异常（JSON 解析失败 / 会话创建失败 / 未知 Python 异常兜底）
     """
     # 正常完成
     if parsed["subtype"] == "success" and not parsed["is_error"] and parsed["stop_reason"] == "end_turn":
@@ -202,8 +229,8 @@ def _determine_status(parsed: dict) -> int:
     # max_turns 超限
     if parsed["subtype"] == "error_max_turns" and parsed["is_error"] and parsed["stop_reason"] == "tool_use":
         return 2
-    # 其他 Claude 返回的错误 → 归入 4（系统异常）
-    return 4
+    # 其他 Claude 返回的错误 → 归入 3（未知 JSON 报错）
+    return 3
 
 
 async def _get_claude_sessionid(dir_path: str, message: str = "你好", timeout: int = 120) -> str:
@@ -247,11 +274,11 @@ async def _periodic_pid_checker():
                 try:
                     os.kill(pid, 0)
                 except ProcessLookupError:
-                    # 进程已死 → status=3（进程异常）
+                    # 进程已死 → status=4（进程异常）
                     database.update_project(
                         row["project_id"],
                         is_finished=1,
-                        status=3,
+                        status=4,
                         subprocess_pid=0,
                     )
                     logger.warning(
@@ -301,7 +328,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
                 project_id,
                 claude_result=json.dumps({"error": "timeout"}, ensure_ascii=False),
                 is_finished=1,
-                status=3,  # 进程异常
+                status=4,  # 进程异常
             )
             logger.error(f"async timeout: project={project_id}")
             return
@@ -310,7 +337,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
         database.update_project(project_id, subprocess_pid=0)
         raw_stdout = stdout
 
-        # JSON 解析失败 → status=4（系统异常）
+        # JSON 解析失败 → status=5（系统异常）
         try:
             parsed = _parse_claude_json(raw_stdout)
         except Exception:
@@ -318,7 +345,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
                 project_id,
                 claude_result=json.dumps({"raw": raw_stdout[:500]}, ensure_ascii=False),
                 is_finished=1,
-                status=4,
+                status=5,  # 系统异常
             )
             logger.error(f"async json_parse_fail: project={project_id}")
             return
@@ -362,7 +389,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
         database.update_project(
             project_id,
             is_finished=1,
-            status=4,  # 系统异常兜底
+            status=5,  # 系统异常兜底
         )
 
 
