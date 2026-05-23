@@ -19,3 +19,10 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Python cache
+__pycache__/
+*.pyc
+
+# PID files
+tmp/*.pid
