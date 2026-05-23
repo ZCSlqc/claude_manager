@@ -21,10 +21,10 @@
       <div class="with-arrow">
         <input v-model="form.dir" placeholder="选择或输入 Project" :disabled="!form.user" />
         <button class="small-arrow" @click.stop="showDirDD"
-          :title="(availableDirs.length) + ' 个项目'">▼</button>
+          :title="(projectDirs.length) + ' 个项目'">▼</button>
       </div>
       <div class="dropdown" v-if="showDD === 'dir' && form.user">
-        <div class="dd-item" v-for="d in availableDirs" :key="d"
+        <div class="dd-item" v-for="d in projectDirs" :key="d"
           @click.stop="pickDir(d)">{{ d }}</div>
       </div>
     </div>
@@ -67,8 +67,6 @@ const showDD = ref('')
 const projectDirs = ref([])
 const userIdMap = ref({}) // name -> user_id
 
-const availableDirs = computed(() => projectDirs.value)
-
 const canSend = computed(() => {
   return form.value.user && form.value.dir && form.value.message.trim() && !props.sending
 })
@@ -93,10 +91,6 @@ async function loadUserProjects() {
   } catch (e) {
     console.error('loadUserProjects error:', e)
   }
-}
-
-function onUserInput() {
-  loadUserProjects()
 }
 
 function pickUser(name) {

@@ -1,80 +1,34 @@
 <template>
-  <div v-if="visible" class="modal-overlay" @click.self="close">
+  <div v-if="visible" class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-log">
       <div class="modal-log-header">
-        <span>日志{{ logFile ? ` — ${logFile}` : '' }}</span>
+        <span>Reply 预览</span>
         <div class="modal-log-right">
-          <button class="btn-copy" @click="refreshLog">刷新</button>
-          <button class="btn-copy" @click="copyLog">复制</button>
-          <button class="btn-close" @click="close">✕</button>
+          <button class="btn-copy" @click="copyReply">复制</button>
+          <button class="btn-close" @click="$emit('close')">✕</button>
         </div>
       </div>
-      <div class="modal-log-body" ref="logBodyRef">
+      <div class="modal-log-body">
         <pre v-if="content">{{ content }}</pre>
-        <div v-else class="log-empty">暂无日志</div>
+        <div v-else class="log-empty">—</div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
-import * as api from '../api/index.js'
-
-const props = defineProps({
-  projectId: { type: String, required: true },
+defineProps({
+  content: { type: String, default: '' },
+  visible: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close'])
+defineEmits(['close'])
 
-const visible = ref(true)
-const content = ref('')
-const logFile = ref('')
-const logBodyRef = ref(null)
-let pollTimer = null
-
-function startPolling() {
-  pollTimer = setInterval(loadLog, 5000)
-}
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+function copyReply() {
+  if (content) {
+    navigator.clipboard.writeText(content)
   }
 }
-
-async function loadLog() {
-  try {
-    const res = await api.getClaudeLog(props.projectId)
-    content.value = res.detail?.log_content || ''
-    logFile.value = res.detail?.log_file || ''
-    // 加载完后自动滚动到底部
-    nextTick(() => {
-      if (logBodyRef.value) {
-        logBodyRef.value.scrollTop = logBodyRef.value.scrollHeight
-      }
-    })
-    // 首次加载成功后开始自动轮询
-    startPolling()
-  } catch (e) {
-    console.error('loadLog error:', e)
-  }
-}
-
-function close() {
-  stopPolling()
-  visible.value = false
-  emit('close')
-}
-
-function copyLog() {
-  navigator.clipboard.writeText(content.value)
-}
-function refreshLog() {
-  loadLog()
-}
-
-loadLog()
 </script>
 
 <style scoped>
@@ -85,7 +39,7 @@ loadLog()
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 150;
+  z-index: 100;
   backdrop-filter: blur(4px);
 }
 .modal-log {
@@ -101,7 +55,6 @@ loadLog()
   flex-direction: column;
   box-shadow: 0 0 60px var(--purple-glow);
 }
-
 .modal-log-header {
   display: flex;
   align-items: center;
@@ -112,13 +65,11 @@ loadLog()
   color: var(--text);
   flex-shrink: 0;
 }
-
 .modal-log-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-
 .btn-copy {
   padding: 4px 12px;
   font-size: 12px;
@@ -131,13 +82,11 @@ loadLog()
   color: var(--text);
   transition: all 0.15s;
 }
-
 .btn-copy:hover {
   background: var(--purple);
   color: white;
   border-color: var(--purple);
 }
-
 .btn-close {
   background: none;
   border: none;
@@ -146,17 +95,15 @@ loadLog()
   cursor: pointer;
   padding: 0 4px;
 }
-
 .btn-close:hover {
   color: var(--text);
 }
-
 .modal-log-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px 24px;
 }
-
 .modal-log-body pre {
   margin: 0;
   white-space: pre-wrap;
@@ -166,7 +113,6 @@ loadLog()
   color: var(--text);
   font-family: var(--font);
 }
-
 .log-empty {
   color: var(--text-dim);
   font-size: 13px;
