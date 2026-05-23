@@ -282,7 +282,7 @@ async def _periodic_pid_checker():
                         subprocess_pid=0,
                     )
                     logger.warning(
-                        f"zombie_pid: user={row['user_id']}, dir={row['folder_name']}, pid={pid}"
+                        f"[ZOMBIE_PID] {row['user_id']} | {project_id} | {pid}"
                     )
                 except PermissionError:
                     # 进程存在但跨用户，不做处理
@@ -381,7 +381,7 @@ async def _run_claude_project(project_id: str, dir_path: str, message: str, sess
             )
         else:
             logger.warning(
-                f"async finished: project={project_id} status={final_status}"
+                f"[ASYNC_FINISHED] {project_id} | status={final_status}"
             )
 
     except Exception as e:
