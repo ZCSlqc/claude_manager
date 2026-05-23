@@ -25,17 +25,17 @@
                 <div class="card-label">Message</div>
                 <div class="card-text">{{ selectedProject.user_input }}</div>
               </div>
-              <div class="card-reply" v-if="getModalReplyText(selectedProject) || selectedProject._loading">
+              <div class="card-reply" v-if="getModalReplyText(selectedProject) || !selectedProject.is_finished">
                 <div class="card-label">Reply</div>
-                <div class="card-text" :class="{ 'card-loading-text': selectedProject._loading }">
-                  {{ selectedProject._loading ? '等待 Claude 回复...' : getModalReplyText(selectedProject) }}
+                <div class="card-text" :class="{ 'card-reply-text': !selectedProject.is_finished, 'card-text': selectedProject.is_finished }">
+                  {{ !selectedProject.is_finished ? '等待 Claude 回复...' : getModalReplyText(selectedProject) }}
                 </div>
               </div>
             </div>
             <div class="card-actions">
               <button class="btn btn-default" @click="openModalFromSelected">详情</button>
               <button class="btn btn-default" @click="handleRetry"
-                :disabled="sending || getThumbStatusClass(selectedProject) !== 'failed'">
+                :disabled="sending || !canRetry(selectedProject)">
                 重试
               </button>
               <button class="btn btn-delete" @click="handleDelete">删除</button>
@@ -83,23 +83,28 @@
               </div>
               <span class="modal-avatar-label">{{ modalProject.folder_name }}</span>
             </div>
+            <div class="modal-meta-line">
+              <span class="modal-meta-label">Session</span>
+              <span>{{ modalProject.session_id || '—' }}</span>
+            </div>
           </div>
           <div class="modal-header-right">
-            <span v-if="modalProject.retries > 0" class="retries-badge">({{ modalProject.retries }}次重试)</span>
             <span class="status-badge modal-status-header" :class="modalStatusClass">{{ modalStatusLabel }}</span>
+            <span v-if="modalProject.retries > 0" class="retries-badge">({{ modalProject.retries }}次重试)</span>
             <button class="btn-close" @click="closeModal">✕</button>
           </div>
         </div>
+        <div class="modal-header-divider"></div>
 
         <div class="modal-body">
           <div class="detail-panels">
-            <div class="detail-panel detail-panel-left">
+            <div class="detail-panel detail-panel-left" :class="{ failed: modalProject.status && modalProject.status > 0 }">
               <div class="detail-label">Message</div>
               <div class="detail-text">{{ modalProject.user_input || '—' }}</div>
             </div>
-            <div class="detail-panel detail-panel-right">
+            <div class="detail-panel detail-panel-right" :class="{ failed: modalProject.status && modalProject.status > 0 }">
               <div class="detail-label">Reply</div>
-              <div v-if="modalReplyText" class="detail-text reply">{{ modalReplyText }}</div>
+              <div v-if="modalReplyText" :class="['detail-text', 'reply', { 'reply-running': !modalProject.is_finished }]">{{ modalReplyText }}</div>
               <div v-if="modalProject.error" class="detail-text error">{{ modalProject.error }}</div>
               <div v-if="!modalReplyText && !modalProject.error" class="detail-text">—</div>
             </div>
@@ -108,11 +113,11 @@
           <div class="detail-meta">
             <div>
               <span>创建: {{ modalDateStr(modalProject.created_at) }}</span>
-              <span v-if="modalTurns != null"> &nbsp; 轮次: {{ modalTurns }}</span>
+              <span v-if="modalTurns != null">  轮次: {{ modalTurns }}</span>
             </div>
             <div>
               <span>更新: {{ modalDateStr(modalProject.updated_at) }}</span>
-              <span> &nbsp; 用时: {{ modalFormattedDuration }}</span>
+              <span>  用时: {{ modalFormattedDuration }}</span>
             </div>
           </div>
         </div>
@@ -121,7 +126,7 @@
           <div class="modal-footer-left" v-if="modalTotalTokens > 0">总token: {{ modalTotalTokens >= 1000000 ? Math.floor(modalTotalTokens / 1000000) + 'M' : fmtToken(modalTotalTokens) }}</div>
           <div class="modal-footer-right">
             <button class="btn-continue" @click="handleRetry"
-              :disabled="sending || modalStatusClass !== 'failed'">
+              :disabled="sending || !canRetry(modalProject)">
               {{ sending ? '发送中...' : '重试 ▶' }}
             </button>
             <button class="btn-delete" @click="handleDelete">删除</button>
@@ -129,6 +134,11 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Toast -->
+  <div v-if="toast" :class="['toast', toast.type]">
+    <span>{{ toast.msg }}</span>
   </div>
 
   <!-- Confirm Dialog -->
@@ -159,13 +169,9 @@ const selectedProject = ref(null)
 const modalProject = ref(null)
 const formRef = ref(null)
 const confirmDialog = ref(null) // { message, onConfirm, label }
+const toast = ref(null) // { msg, type }
 const currentUserId = ref('') // 跟踪当前表单选中的 user_id
-const loadingProjects = reactive(new Set()) // 存储 "user_id:folder_name" 复合 key
-let pollTimer = null
-
-function setLoadingKey(dir, uid) {
-  return `${uid}:${dir}`
-}
+const pollTimer = null
 
 // ── Computed ──
 const sortedProjects = computed(() => {
@@ -237,24 +243,24 @@ function getUserAvatarId(userId) {
   return u?.user_avatar_id ?? 1
 }
 function getModalReplyText(p) {
-  if (!p?.claude_result) return ''
-  try {
-    const cr = typeof p.claude_result === 'string' ? JSON.parse(p.claude_result) : p.claude_result
-    return cr.result || cr.output || ''
-  } catch { return '' }
+  if (!p?.claude_output) return ''
+  return p.claude_output
 }
 function getThumbStatusLabel(p) {
   if (!p) return '—'
-  if (p._loading || p.is_finished === 0) return '活跃'
+  if (!p.is_finished) return '活跃'
   if (p.status === 0) return '完成'
-  const labels = { 1: 'API', 2: '超限', 3: '超时', 4: 'JSON', 5: '异常' }
-  return labels[p.status] || '未知'
+  return '失败'
 }
 function getThumbStatusClass(p) {
   if (!p) return 'failed'
-  if (p._loading || p.is_finished === 0) return 'running'
+  if (!p.is_finished) return 'running'
   if (p.status === 0) return 'active'
   return 'failed'
+}
+function canRetry(p) {
+  if (!p) return false
+  return p.is_finished === 1 && p.status > 0
 }
 function modalDateStr(ts) {
   return new Date(ts * 1000).toLocaleString()
@@ -276,7 +282,8 @@ function fmtDuration(ms) {
 // ── Actions ──
 async function fetchAll() {
   try {
-    projects.value = await api.getProjects()
+    const pData = await api.getProjects()
+    projects.value = Array.isArray(pData) ? pData : (pData.code || [])
   } catch (e) {
     console.error('fetchAll error:', e)
   }
@@ -284,34 +291,11 @@ async function fetchAll() {
 
 async function refreshProjects() {
   try {
-    const data = await api.getProjects()
-    // Merge: backend projects inherit _loading if their composite key is still tracked
-    const merged = data.map(b => ({
-      ...b,
-      _loading: loadingProjects.value.has(setLoadingKey(b.folder_name, b.user_id)) ? true : undefined,
-    }))
-    // Keep temp cards whose user_id:folder_name does NOT match any backend project
-    const apiKeys = new Set(data.map(p => setLoadingKey(p.folder_name, p.user_id)))
-    for (const p of projects.value) {
-      const key = setLoadingKey(p.folder_name, p.user_id)
-      if (p._loading && !apiKeys.has(key)) {
-        merged.push(p)
-      }
-    }
-    projects.value = merged
+    const pData = await api.getProjects()
+    projects.value = Array.isArray(pData) ? pData : (pData.code || [])
   } catch (e) {
     console.error('refreshProjects error:', e)
   }
-}
-function setProjectLoading(dir, message, uid) {
-  const key = `${uid}:${dir}`
-  loadingProjects.value.add(key)
-  projects.value = projects.value.map(p => {
-    if (p.folder_name === dir && p.user_id === uid) {
-      return { ...p, _loading: true, is_finished: 0, status: 0, user_input: message, claude_result: null, updated_at: Date.now() }
-    }
-    return p
-  })
 }
 
 function handleSelect(p) {
@@ -328,100 +312,39 @@ async function handleSend() {
   if (!message.trim() || !user || !dir) return
 
   sending.value = true
-
-  // 如果项目已存在，设置 loading 状态并保留 user_input
-  let project = currentUserId.value
-    ? projects.value.find(p => p.folder_name === dir && p.user_id === currentUserId.value)
-    : projects.value.find(p => p.folder_name === dir)
-  if (project) {
-    setProjectLoading(dir, message, currentUserId.value)
-    selectedProject.value = projects.value.find(p => p.folder_name === dir && p.user_id === currentUserId.value)
-  } else {
-    // 新建项目：预置 user_input + loading 状态
-    // session_avatar_id 用和后端一致的 int.from_bytes(...) 算法
-    function toBigint(s) {
-      return BigInt('0x' + [...s].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(''))
-    }
-    const uid = currentUserId.value
-    const newProject = {
-      _loading: true, folder_name: dir, user_input: message,
-      is_finished: 0, status: 0, user_id: uid,
-      session_avatar_id: Number(toBigint(dir) % 100n) + 1,
-    }
-    loadingProjects.value.add(setLoadingKey(dir, uid))
-    projects.value.push(newProject)
-    selectedProject.value = newProject
-  }
-
-  const prevMsg = message
   formRef.value.form.message = ''
 
   // 停止旧的轮询
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (pollTimer.value) { clearInterval(pollTimer.value); pollTimer.value = null }
 
   try {
-    const { state, project_id } = await api.sendChat(user, dir, prevMsg)
+    const res = await api.sendChat(user, dir, message)
+    const project_id = res.detail?.project_id || res.project_id
 
-    if (state === 'success') {
-      sending.value = false  // 立即解锁按钮
-
-      // 后端只返回 project_id，前端立即开始轮询
-      // 每 3 秒轮询一次，直到项目完成
-      pollTimer = setInterval(async () => {
-        await refreshProjects()
-        // 优先按 project_id 匹配，若 temp 项目没有 project_id 则按 user_id:folder_name 匹配
-        const updated = projects.value.find(
-          p => p.project_id === project_id
-            || (!p.project_id && p.folder_name === dir && p.user_id === currentUserId.value)
-        )
-        if (updated && updated.is_finished === 1) {
-          clearInterval(pollTimer)
-          pollTimer = null
-          loadingProjects.value.delete(setLoadingKey(updated.folder_name, updated.user_id))
-          projects.value = projects.value.map(p => ({ ...p, _loading: false }))
-          selectedProject.value = { ...updated }
-        } else if (updated) {
-          // 仍在运行中，更新左侧概览卡片
-          selectedProject.value = { ...updated }
-        }
-      }, 3000)
-      // 立即刷新一次
-      await refreshProjects()
-      const immediate = projects.value.find(
-        p => p.project_id === project_id
-          || (!p.project_id && p.folder_name === dir && p.user_id === currentUserId.value)
-      )
-      if (immediate && immediate.is_finished === 1) {
-        clearInterval(pollTimer)
-        pollTimer = null
-        loadingProjects.value.delete(setLoadingKey(immediate.folder_name, immediate.user_id))
-        projects.value = projects.value.map(p => ({ ...p, _loading: false }))
-        selectedProject.value = { ...immediate }
-      } else if (immediate) {
-        selectedProject.value = { ...immediate }
-      }
-    } else {
-      // 状态不是 success，直接解锁
+    if (res.success !== false) {
       sending.value = false
     }
+
+    // 立即刷新一次
+    await refreshProjects()
   } catch (err) {
-    projects.value = projects.value.map(p => {
-      const matchDir = currentUserId.value ? (p.folder_name === dir && p.user_id === currentUserId.value) : p.folder_name === dir
-      if (matchDir) {
-        loadingProjects.value.delete(setLoadingKey(dir, currentUserId.value))
-        return { ...p, _loading: false, is_finished: 1, status: 5 }
-      }
-      return p
-    })
     sending.value = false
-    if (err.status === 409) alert(err.error || 'session 使用中')
-    else alert('发送失败: ' + (err.detail || err.message || JSON.stringify(err)))
+    if (err.status === 409) {
+      showToast(err.error || 'session 使用中', 'error')
+    } else {
+      showToast('发送失败: ' + (err.detail || err.message || JSON.stringify(err)), 'error')
+    }
     await refreshProjects()
   }
 }
 
 function _targetProject() {
   return selectedProject.value || modalProject.value
+}
+
+function showToast(msg, type = 'error') {
+  toast.value = { msg, type }
+  setTimeout(() => { toast.value = null }, 2000)
 }
 
 function showConfirm(message, onConfirm) {
@@ -449,8 +372,7 @@ async function handleRetry() {
   showConfirm('确定要重试吗？', async () => {
     sending.value = true
     try {
-      api.heartbeat(proj.project_id).catch(() => {})
-      const result = await api.continueProject(proj.project_id)
+      const result = await api.retryProject(proj.project_id)
       await refreshProjects()
       const updated = projects.value.find(p => p.project_id === result.project_id)
       if (updated) {
@@ -477,42 +399,59 @@ function closeModal() {
 // ── Init ──
 onMounted(async () => {
   try {
-    users.value = await api.getUsers()
+    const uData = await api.getUsers()
+    users.value = Array.isArray(uData) ? uData : (uData.code || [])
     for (const u of users.value) {
       userMap.value[u.user_id] = { name: u.name, user_avatar_id: u.user_avatar_id }
     }
     await fetchAll()
+    // 恢复 localStorage 缓存的 user/dir，更新左侧卡片
+    const cachedUser = localStorage.getItem('pref_user')
+    const cachedDir = localStorage.getItem('pref_dir')
+    if (cachedUser && cachedDir) {
+      formRef.value.form.user = cachedUser
+      formRef.value.form.dir = cachedDir
+      currentUserId.value = Object.entries(userMap.value).find(([uid, u]) => u.name === cachedUser)?.[0] || ''
+      if (currentUserId.value) {
+        const p = projects.value.find(p => p.folder_name === cachedDir && p.user_id === currentUserId.value)
+        selectedProject.value = p ? { ...p } : null
+      }
+    }
   } catch (e) {
     console.error('onMounted error:', e)
   }
+  // 每 3s 轮询，更新左侧卡片和 modal
+  setInterval(async () => {
+    await refreshProjects()
+    if (selectedProject.value) {
+      const updated = projects.value.find(p => p.project_id === selectedProject.value.project_id)
+      if (updated) selectedProject.value = { ...updated }
+    }
+    if (modalProject.value) {
+      const updated = projects.value.find(p => p.project_id === modalProject.value.project_id)
+      if (updated) modalProject.value = { ...updated }
+    }
+  }, 3000)
 })
 
-// 清理轮询
-window.addEventListener('beforeunload', () => {
-  if (pollTimer) clearInterval(pollTimer)
-})
-
-// 表单 user/dir 变化时只更新左侧概览卡片，不自动弹出详情弹窗
-watch([() => formRef.value?.form.user, () => formRef.value?.form.dir], ([user, dir]) => {
-  if (user && dir) {
-    // 先确认 user 存在
-    currentUserId.value = Object.entries(userMap.value).find(([uid, u]) => u.name === user)?.[0] || ''
-  } else {
-    currentUserId.value = ''
-    selectedProject.value = null
-    modalProject.value = null
-  }
-  if (user && dir && currentUserId.value) {
-    const p = projects.value.find(p => p.folder_name === dir && p.user_id === currentUserId.value)
-    if (p) {
-      selectedProject.value = { ...p }
+// 仅当 user/dir 变化时更新左侧卡片，message 变化不触发
+watch(
+  () => [formRef.value?.form.user, formRef.value?.form.dir],
+  ([user, dir]) => {
+    if (user && dir) {
+      currentUserId.value = Object.entries(userMap.value).find(([uid, u]) => u.name === user)?.[0] || ''
+      if (currentUserId.value) {
+        const p = projects.value.find(p => p.folder_name === dir && p.user_id === currentUserId.value)
+        selectedProject.value = p ? { ...p } : null
+      } else {
+        selectedProject.value = null
+      }
     } else {
+      currentUserId.value = ''
       selectedProject.value = null
     }
-  } else {
-    selectedProject.value = null
   }
-}, { deep: true })
+)
 </script>
 
 <style>
@@ -654,8 +593,8 @@ body::before {
   margin-bottom: 3px;
 }
 .card-text { font-size: 12px; color: var(--text); word-break: break-word; }
+.card-reply-text { font-size: 12px; color: var(--warning); word-break: break-word; }
 .card-reply { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-.card-loading-text { color: var(--warning); }
 .card-actions { display: flex; gap: 6px; margin-top: 4px; }
 .btn {
   display: inline-flex;
@@ -809,6 +748,28 @@ body::before {
   50% { opacity: 0.6; }
 }
 
+/* Toast */
+.toast {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  background: var(--error);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  animation: toastIn 0.2s ease-out;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;
@@ -868,8 +829,23 @@ body::before {
   position: relative;
 }
 .modal-header-left { flex: 1; }
-.modal-header-right { display: flex; align-items: flex-end; gap: 8px; }
+.modal-header-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0;
+}
+.modal-header-right { display: flex; align-items: center; gap: 8px; }
 .modal-user-row { display: flex; align-items: center; gap: 4px; }
+.modal-meta-line {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.modal-meta-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
 .modal-avatar-block {
   flex-shrink: 0;
   border-radius: 8px;
@@ -893,13 +869,12 @@ body::before {
   font-weight: 600;
 }
 .status-badge.modal-status-header {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 10px;
+  font-size: 20px;
+  padding: 0;
+  border-radius: 0;
   font-weight: 600;
-  margin-left: 4px;
-  align-self: flex-end;
-  margin-bottom: 2px;
+  align-self: flex-start;
+  line-height: 1;
 }
 .status-badge.active { background: rgba(34, 197, 94, 0.15); color: var(--success); }
 .status-badge.running { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
@@ -912,7 +887,8 @@ body::before {
   color: var(--text-dim);
   font-size: 18px;
   cursor: pointer;
-  padding: 4px 0 0 4px;
+  padding: 0;
+  margin-top: -10px;
 }
 .btn-close:hover { color: var(--text); }
 .modal-body {
@@ -926,19 +902,23 @@ body::before {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 12px;
+  padding: 18px;
+}
+.detail-panel.failed {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 .detail-panel-left { flex: 1; }
 .detail-panel-right { flex: 2; }
 .detail-label {
-  font-size: 10px;
+  font-size: 15px;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   letter-spacing: 0.5px;
 }
 .detail-text {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -947,6 +927,9 @@ body::before {
 .detail-text.reply {
   height: 12em;
   overflow-y: auto;
+}
+.reply-running {
+  color: var(--warning);
 }
 .detail-text.error { color: var(--error); }
 .detail-meta {

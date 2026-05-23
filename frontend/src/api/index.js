@@ -30,12 +30,8 @@ export async function sendChat(user, dir, message) {
   return r.json()
 }
 
-export async function heartbeat(id) {
-  return (await fetch(`${API}/heartbeat/${id}`, { method: 'POST' })).json()
-}
-
-export async function continueProject(id) {
-  return (await fetch(`${API}/continue/${id}`, { method: 'POST' })).json()
+export async function retryProject(id) {
+  return (await fetch(`${API}/api/retry/${id}`)).json()
 }
 
 export async function updateProject(id, fields) {

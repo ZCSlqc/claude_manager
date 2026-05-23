@@ -5,8 +5,7 @@
     <div class="form-group">
       <label>User</label>
       <div class="with-arrow">
-        <input v-model="form.user" placeholder="选择或输入 User"
-          @input="onUserInput" />
+        <input v-model="form.user" placeholder="选择或输入 User" />
         <button class="small-arrow" @click.stop="showDD = showDD === 'user' ? '' : 'user'"
           :title="users.length + ' 个 User'">▼</button>
       </div>
@@ -88,8 +87,8 @@ async function loadUserProjects() {
       uid = u.user_id
       userIdMap.value[name] = uid
     }
-    const projs = await api.getProjects(uid)
-    projectDirs.value = projs.map(p => p.folder_name)
+    const pData = await api.getProjects(uid)
+    projectDirs.value = (Array.isArray(pData) ? pData : (pData.code || [])).map(p => p.folder_name)
   } catch (e) {
     console.error('loadUserProjects error:', e)
   }
@@ -261,6 +260,10 @@ defineExpose({ form, canSend })
 .btn-send {
   width: 100%;
   padding: 10px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 10px;
   background: linear-gradient(135deg, var(--purple), #6d28d9);
@@ -268,8 +271,9 @@ defineExpose({ form, canSend })
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: box-shadow 0.2s, transform 0.2s;
   letter-spacing: 0.3px;
+  margin-top: -6px;
 }
 
 .btn-send:disabled {
