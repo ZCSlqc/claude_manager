@@ -51,7 +51,7 @@ logger.add(
 )
 
 # ── App ───────────────────────────────────────────────────
-app = FastAPI(title="Claude Code Proxy")
+app = FastAPI(title="Claude Manager")
 
 # wrap_response 必须在最外层（最后注册、最先执行），避免被中间件消耗 body
 # CORSMiddleware 在 wrap 内部，不会被重复消费 body

@@ -228,15 +228,6 @@ function fmtToken(n) {
   color: var(--text);
   white-space: nowrap;
 }
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 18px;
-  cursor: pointer;
-  padding: 0;
-}
-.modal-close:hover { color: var(--text); }
 .modal-body {
   padding: 24px;
   overflow-y: auto;
@@ -279,19 +270,6 @@ function fmtToken(n) {
   text-transform: uppercase;
   color: var(--text-dim);
   letter-spacing: 0.5px;
-}
-.detail-copy {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-dim);
-  font-size: 12px;
-  padding: 2px 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.detail-copy:hover {
-  color: var(--purple);
 }
 .detail-text {
   font-size: 15px;
@@ -353,80 +331,4 @@ function fmtToken(n) {
 }
 .modal-footer-left { flex: 1; color: var(--text-dim); font-size: 12px; }
 .modal-footer-right { display: flex; gap: 8px; }
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--font);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
-  letter-spacing: 0.2px;
-}
-.btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-default {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-.btn-default:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--purple);
-}
-.btn-continue {
-  padding: 6px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--font);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
-  background: var(--purple);
-  color: white;
-  letter-spacing: 0.2px;
-}
-.btn-continue:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-continue:hover:not(:disabled) {
-  background: #6d28d9;
-}
-.btn-continue:active:not(:disabled) {
-  background: #5b21b6;
-}
-.btn-delete {
-  background: #7f1d1d;
-  color: white;
-  padding: 6px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--font);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  letter-spacing: 0.2px;
-}
-.btn-delete:hover:not(:disabled) {
-  background: #991b1b;
-}
-.btn-delete-all {
-  background: #7f1d1d;
-  color: white;
-  padding: 6px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--font);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  letter-spacing: 0.2px;
-}
-.btn-delete-all:hover:not(:disabled) {
-  background: #991b1b;
-}
 </style>

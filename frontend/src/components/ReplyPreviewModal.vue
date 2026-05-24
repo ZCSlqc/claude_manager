@@ -70,34 +70,6 @@ function copyReply() {
   align-items: center;
   gap: 8px;
 }
-.btn-copy {
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  font-family: var(--font);
-  border-radius: 8px;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text);
-  transition: all 0.15s;
-}
-.btn-copy:hover {
-  background: var(--purple);
-  color: white;
-  border-color: var(--purple);
-}
-.btn-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 18px;
-  cursor: pointer;
-  padding: 0 4px;
-}
-.btn-close:hover {
-  color: var(--text);
-}
 .modal-log-body {
   flex: 1;
   min-height: 0;

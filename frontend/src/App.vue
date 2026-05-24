@@ -431,6 +431,192 @@ body::before {
   opacity: 0.4;
 }
 
+/* Global Button Styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  letter-spacing: 0.2px;
+}
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-default {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn-default:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--purple);
+}
+
+.btn-primary {
+  background: var(--purple);
+  color: white;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #6d28d9;
+}
+.btn-primary:active:not(:disabled) {
+  background: #5b21b6;
+}
+
+.btn-continue {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  background: var(--purple);
+  color: white;
+  letter-spacing: 0.2px;
+}
+.btn-continue:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-continue:hover:not(:disabled) {
+  background: #6d28d9;
+}
+.btn-continue:active:not(:disabled) {
+  background: #5b21b6;
+}
+
+.btn-delete {
+  background: #7f1d1d;
+  color: white;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.2px;
+}
+.btn-delete:hover:not(:disabled) {
+  background: #991b1b;
+}
+
+.btn-copy {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font);
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  transition: all 0.15s;
+}
+.btn-copy:hover {
+  background: var(--purple);
+  color: white;
+  border-color: var(--purple);
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.btn-close:hover {
+  color: var(--text);
+}
+
+.detail-copy {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.detail-copy:hover {
+  color: var(--purple);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.modal-close:hover { color: var(--text); }
+
+.btn-send {
+  width: 100%;
+  padding: 10px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--purple), #6d28d9);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+  letter-spacing: 0.3px;
+  margin-top: -6px;
+}
+.btn-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.btn-send:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+  transform: translateY(-1px);
+}
+.btn-send:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.small-arrow {
+  flex-shrink: 0;
+  width: 32px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  color: var(--text-dim);
+  font-size: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.small-arrow:hover {
+  background: var(--purple);
+  color: white;
+  border-color: var(--purple);
+}
+.small-arrow:active {
+  transform: scale(0.95);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

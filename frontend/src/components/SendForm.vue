@@ -185,34 +185,6 @@ defineExpose({ form, canSend })
   line-height: 1.5;
 }
 
-.small-arrow {
-  flex-shrink: 0;
-  width: 32px;
-  height: 38px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg3);
-  color: var(--text-dim);
-  font-size: 9px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  line-height: 1;
-}
-
-.small-arrow:hover {
-  background: var(--purple);
-  color: white;
-  border-color: var(--purple);
-  transform: scale(1.05);
-}
-
-.small-arrow:active {
-  transform: scale(0.95);
-}
-
 .dropdown {
   position: absolute;
   top: 100%;
@@ -222,7 +194,7 @@ defineExpose({ form, canSend })
   margin-top: 4px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   max-height: 180px;
   overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -250,38 +222,5 @@ defineExpose({ form, canSend })
 
 .dd-item:hover {
   background: var(--bg-hover);
-}
-
-.btn-send {
-  width: 100%;
-  padding: 10px;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--purple), #6d28d9);
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: box-shadow 0.2s, transform 0.2s;
-  letter-spacing: 0.3px;
-  margin-top: -6px;
-}
-
-.btn-send:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.btn-send:not(:disabled):hover {
-  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
-  transform: translateY(-1px);
-}
-
-.btn-send:not(:disabled):active {
-  transform: translateY(0);
 }
 </style>
