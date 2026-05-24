@@ -1,7 +1,7 @@
 <template>
   <div class="selected-card">
     <div class="card-header">
-      <img class="card-avatar" :src="avatarUrl(project.session_avatar_id || 1, 'session')" :width="20" :height="20" />
+      <img class="card-avatar" :src="avatarUrl(project.session_avatar_id || 1, 'session')" :width="20" :height="20" style="image-rendering: pixelated" />
       <span :class="['card-status', statusClass]">{{ statusLabel }}</span>
     </div>
     <div class="card-path" :title="project.folder_name">{{ project.folder_name }}</div>

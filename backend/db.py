@@ -80,7 +80,7 @@ def add_user(name: str) -> dict:
     conn = _connect()
     try:
         uid = _uid()
-        avatar_id = uuid.uuid4().int % 20 + 1
+        avatar_id = uuid.uuid4().int % 33 + 1
         conn.execute(
             "INSERT INTO user (user_id, name, user_avatar_id) VALUES (?, ?, ?)",
             (uid, name, avatar_id),

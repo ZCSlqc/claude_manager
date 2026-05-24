@@ -8,14 +8,16 @@
               <div class="modal-avatar-block modal-avatar-user">
                 <img class="modal-avatar-img"
                   :src="avatarUrl(getUserAvatarId(project.user_id), 'user')"
-                  :width="60" :height="60" :title="userName" />
+                  :width="60" :height="60" :title="userName"
+                  style="image-rendering: pixelated" />
               </div>
               <span class="modal-avatar-label">{{ userName }}</span>
               <span class="modal-arrow">→</span>
               <div class="modal-avatar-block modal-avatar-project">
                 <img class="modal-avatar-img"
                   :src="avatarUrl(project.session_avatar_id, 'session')"
-                  :width="60" :height="60" :title="project.folder_name" />
+                  :width="60" :height="60" :title="project.folder_name"
+                  style="image-rendering: pixelated" />
               </div>
               <span class="modal-avatar-label">{{ project.folder_name }}</span>
             </div>
@@ -105,7 +107,8 @@ function getUserAvatarId(userId) {
 
 const userName = computed(() => {
   if (!props.project) return ''
-  return Object.entries(props.userMap).find(([uid]) => uid === props.project.user_id)?.[1]?.name || '?'
+  const uid = String(props.project.user_id)
+  return Object.entries(props.userMap).find(([u]) => u === uid)?.[1]?.name || '?'
 })
 
 function getStatusLabel() {
@@ -331,4 +334,5 @@ function fmtToken(n) {
 }
 .modal-footer-left { flex: 1; color: var(--text-dim); font-size: 12px; }
 .modal-footer-right { display: flex; gap: 8px; }
+.btn-delete-all { background: var(--error); color: white; border: none; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
 </style>

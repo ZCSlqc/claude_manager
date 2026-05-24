@@ -5,7 +5,7 @@
     @contextmenu.prevent="$emit('select', project)"
     @click="$emit('context', project)">
     <div class="thumb-top">
-      <img class="thumb-avatar" :src="thumbAvatar" :width="60" :height="60" :title="project.folder_name" />
+      <img class="thumb-avatar" :src="thumbAvatar" :width="60" :height="60" :title="project.folder_name" style="image-rendering: pixelated" />
       <div class="thumb-right">
         <span :class="['thumb-status', thumbStatusClass(project)]">{{ thumbStatusLabel(project) }}</span>
         <div :class="['thumb-reply', { 'thumb-reply-running': !project.is_finished }]" :title="thumbReplyTitle(project)">{{ thumbReplyText(project) }}</div>

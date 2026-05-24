@@ -117,9 +117,8 @@ def get_avatar(avatar_type: str, num: int):
     path = AVATAR_DIR / avatar_type / f"avatar_{num:03d}.png"
     if not path.exists():
         path = AVATAR_DIR / avatar_type / "avatar_001.png"
-    return StaticFiles.single_response(
-        Request(scope={"method": "GET", "path": str(path)}), path=path,
-    )
+    from fastapi.responses import FileResponse
+    return FileResponse(str(path), media_type="image/png")
 
 
 # ═══════════════════════════════════════════════════════════
