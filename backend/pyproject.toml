@@ -1,0 +1,11 @@
+[project]
+name = "claude-manager"
+version = "0.1.0"
+description = "Claude Code 托管代理管理后台"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "loguru",
+]
