@@ -29,3 +29,6 @@ tmp/
 
 # Test
 test/
+
+# Generated avatars (served by backend API)
+backend/static/
