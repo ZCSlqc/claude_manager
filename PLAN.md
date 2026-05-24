@@ -14,7 +14,7 @@
 |---|---|---|
 | `user_id` | TEXT (PRIMARY KEY) | 32 位 UUID（`uuid.uuid4().hex`） |
 | `name` | TEXT (UNIQUE, NOT NULL) | 用户名，如 LQC |
-| `user_avatar_id` | INTEGER | 用户头像编号（1-20，对应 static/avatars/user/ 下的 PNG） |
+| `user_avatar_id` | INTEGER | 用户头像编号（1-33，对应 static/avatars/user/ 下的 PNG） |
 | `created_at` | REAL | Unix 时间戳 |
 | `updated_at` | REAL | Unix 时间戳 |
 
@@ -88,45 +88,50 @@ user ────< project
 ### 2.1 GET /health
 - 返回: `{"status": "ok"}`
 
-### 2.2 GET /users
+### 2.2 GET /avatar/{type}/{id}.png
+- 返回头像 PNG 图片
+- 类型：`user`（1-33）或 `session`（1-100）
+- 使用 `FileResponse` 返回 `backend/static/avatars/{type}/avatar_{id:03d}.png`
+
+### 2.3 GET /users
 - 返回: `[{user_id, name, user_avatar_id, created_at, updated_at}, ...]`
 
-### 2.3 GET /projects?user_id=xxx
+### 2.4 GET /projects?user_id=xxx
 - 列出项目（可选按 user 过滤）
 - 返回: `[{project_id, user_id, folder_name, claude_path, session_id, user_input, is_finished, status, claude_result, claude_output, ...}, ...]`
 
-### 2.4 GET /projects/{project_id}
+### 2.5 GET /projects/{project_id}
 - 获取项目详情（含完整 `claude_result`）
 
-### 2.5 PATCH /projects/{project_id}
+### 2.6 PATCH /projects/{project_id}
 - 更新项目字段
 
-### 2.6 DELETE /projects/{project_id}
+### 2.7 DELETE /projects/{project_id}
 - 删除项目：
   1. 获取 `subprocess_pid`，如果 > 0 则 `os.kill(pid, 9)` 终止进程
   2. 清理项目文件：删除 `session_id.jsonl`、`claude_path` 目录、项目文件夹
   3. 清理 `~/.claude/projects` 下的空子目录
   4. 删除 DB 记录
 
-### 2.7 DELETE /users/{user_id}
+### 2.8 DELETE /users/{user_id}
 - 删除用户：
   1. 遍历该用户所有项目，逐个项目删除（同 DELETE /projects/{id}）
   2. 清理空目录
   3. 删除 DB 记录
 
-### 2.8 POST /api/claude
+### 2.9 POST /api/claude
 - 发送消息：查/建 user → 查/建 project → 创建 session（如无）→ 异步执行 Claude subprocess → 立即返回 `project_id`
 - 请求体: `{user, dir, message}`
 - 返回: `{"success":true,"code":["project_id"],"detail":{"project_id":"..."}}`
 
-### 2.9 GET /api/retry/{project_id}
+### 2.10 GET /api/retry/{project_id}
 - 重试项目：获取已有 `session_id` 和 `user_input` → 追加 `"继续完成未完成的内容。"` → 异步执行 → 返回 `project_id`
 
-### 2.10 GET /api/claude-log/{project_id}
+### 2.11 GET /api/claude-log/{project_id}
 - 获取项目对应的 Claude session JSONL 日志
 - 读取 `~/.claude/projects/{session_id}.jsonl` 文件最后 40 行
 
-### 2.11 异步执行流程（`_run_claude`）
+### 2.12 异步执行流程（`_run_claude`）
 
 ```
 1. 创建 subprocess: claude -p --dangerously-skip-permissions --output-format json --resume <session_id> "<message>"
@@ -138,7 +143,7 @@ user ────< project
 7. 记录日志：[CALLBACK] success=true/false project_id=xxx
 ```
 
-### 2.12 日志格式
+### 2.13 日志格式
 - 统一用 `[CALLBACK]` 前缀：
   - 成功：`[CALLBACK] success=True project_id={id} result={result[:200]}`
   - 失败：`[CALLBACK] success=False project_id={id} msg={error}`
@@ -184,7 +189,7 @@ user ────< project
 - **Message**：textarea，Ctrl+Enter 快捷发送
 - **发送按钮**：`发送 ▶` / `发送中...`，disabled 条件：user/dir/message 任一为空
 
-#### 3.2.2 左侧底部选中卡片（selected card）
+#### 3.2.2 左侧底部选中卡片（SelectedCard.vue）
 
 显示选中项目的详情：
 - 头部：头像 + 状态标签
@@ -202,17 +207,17 @@ user ────< project
 
 ### 3.3 右侧面板
 
-#### 3.3.1 项目网格（ProjectCard.vue）
+#### 3.3.1 项目网格（ProjectGrid.vue）
 
 - 瀑布流网格布局，自适应列数（`minmax(130px, 1fr)`）
-- **缩略卡片**显示：
-  - 头像（session_avatar_id）
+- **缩略卡片**（ProjectCard.vue）显示：
+  - 头像（session_avatar_id，8x8 像素画）
   - 状态标签：完成=绿色、活跃=黄色、失败=红色
   - Reply 预览：最多 6 行，活跃时显示黄色"等待 Claude 回复..."
   - 底部路径名
 - **交互**：
-  - **左键单击**：同步左侧 User/Project 卡片
-  - **右键单击**：打开 DetailModal（阻止默认右键菜单）
+  - **左键单击**：打开 DetailModal（只弹弹窗，不动左侧卡片）
+  - **右键单击**：同步左侧 User/Project 卡片
   - 选中状态：高亮边框
 
 ### 3.4 Modal 弹窗
@@ -233,7 +238,7 @@ user ────< project
   - 更新时间 + 用时
 - 底部 footer：
   - 左侧：总 token（M/K 显示）
-  - 右侧：重试 ▶（紫色）、日志（深红）、删除项目（深红）、删除用户（深红）
+  - 右侧：重试 ▶（紫色）、日志（深红）、删除项目（深红）、删除用户（深红，`.btn-delete-all`）
 - footer 顶部分隔线
 
 #### 3.4.2 日志 Modal（LogModal.vue）
@@ -242,6 +247,23 @@ user ────< project
 - 主体：JSONL 日志文本（最后 40 行，自动滚动到底部）
 - 每 5 秒自动刷新，关闭时清除定时器
 - 数据来源：`GET /api/claude-log/{project_id}`
+
+#### 3.4.3 回复预览 Modal（ReplyPreviewModal.vue）
+
+- 在 Modal 中展示完整 AI 回复
+- 支持一键复制
+
+#### 3.4.4 确认弹窗（ConfirmDialog.vue）
+
+- 模态确认框（删除项目、删除用户）
+- 样式：紫色光晕，确认按钮红色，取消按钮灰色
+- 通过 `showConfirm(message, callback)` 调用
+
+#### 3.4.5 Toast 通知（Toast.vue）
+
+- 顶部居中弹窗，2s 自动消失
+- 样式：红色背景（`var(--error)`），入场动画
+- 触发：发送失败、重试失败等
 
 ### 3.5 数据流
 
@@ -258,10 +280,9 @@ user ────< project
     → 每 3s 轮询更新项目状态
 
 选中项目：
-  左侧卡片 ← 双击右侧卡片（同步 User/Project）
-  左侧卡片 ← 选择 User + Project
-  右侧卡片左键 → 同步左侧
-  右侧卡片右键 → 打开 Modal
+  左侧卡片 ← 选择 User + Project（SendForm 触发）
+  右侧卡片右键 → 同步左侧（handleSelectByCard）
+  右侧卡片左键 → 只打开 Modal（handleSelect）
 ```
 
 ### 3.6 API 封装（api/index.js）
@@ -270,6 +291,7 @@ user ────< project
 const API = ''  // 空字符串，vite proxy 转发
 
 getHealth()                    → GET /health
+getAvatar(type, id)            → GET /avatar/{type}/{id}.png
 getUsers()                     → GET /users
 getProjects(user_id?)          → GET /projects
 getProject(id)                 → GET /projects/{id}
@@ -283,8 +305,13 @@ getClaudeLog(projectId)        → GET /api/claude-log/{id}
 
 ### 3.7 头像（utils/avatar.js）
 
-- 根据 `avatarId` 返回静态资源路径：`/static/avatars/{user,session}/{id}.png`
+- 根据 `avatarId` 返回后端 API 路径：`/avatar/{type}/{num}.png`
+- type：`user`（1-33）或 `session`（1-100）
 - 默认头像 ID：user=1, session=1
+- 头像由 `backend/generate_avatars.py` 生成，8x8 像素画
+- 33 个用户头像：A-Z（幽灵、表情、符号）+ Z（几何）+ *（星星）+ 0-6（圆脸、闪电、笑脸、蛇、骰子、音符、眼睛）
+- 前端通过 Vite 代理（`vite.config.js`）转发 `/avatar` 到后端 8112
+- 图片使用 `image-rendering: pixelated` 保持像素风格清晰
 
 ### 3.8 样式
 
@@ -297,18 +324,6 @@ getClaudeLog(projectId)        → GET /api/claude-log/{id}
 - **三卡片风格统一**：
   - 状态标签：`.thumb-status`（小卡片）、`.card-status`（左侧）、`.status-badge`（Modal header 复用 `.thumb-status`）
   - 三卡片状态颜色一致：完成=绿色，活跃=黄色，失败=红色
-
-### 3.9 Toast 通知
-
-- 顶部居中弹窗，2s 自动消失
-- 样式：红色背景（`var(--error)`），入场动画
-- 触发：发送失败、重试失败等
-
-### 3.10 Confirm Dialog
-
-- 模态确认框（删除项目、删除用户）
-- 样式：紫色光晕，确认按钮红色，取消按钮灰色
-- 通过 `showConfirm(message, callback)` 调用
 
 ---
 
@@ -344,3 +359,41 @@ getClaudeLog(projectId)        → GET /api/claude-log/{id}
 1. 逐个删除该用户所有项目（同上）
 2. 清理 `~/.claude/projects` 下空子目录
 3. 删除 DB 记录
+
+---
+
+## 七、运维
+
+### 启动流程
+
+```bash
+# 初始化（安装依赖、生成头像、构建前端）
+bash init.sh
+
+# 启动服务（自动清理旧进程）
+bash start.sh
+```
+
+### 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 后端 | FastAPI + uvicorn + SQLite + uv |
+| 前端 | Vue 3 + Vite |
+| 头像 | 8x8 像素画生成（Python, generate_avatars.py） |
+
+### 端口
+
+- 后端: `8112`（`backend/main.py`）
+- 前端: `3112`（`frontend/vite.config.js` + `start.sh`）
+- 前端 Vite 代理配置：`/avatar`, `/api`, `/static`, `/chat`, `/continue`, `/heartbeat`, `/users`, `/projects` → 后端 8112
+
+### 数据库
+
+- 位置：`data/claude_manager.db`
+- 备份：`cp data/claude_manager.db data/claude_manager.db.bak`
+
+### Git
+
+- 分支：`main`
+- 远程：`git@github.com:ZCSlqc/claude_manager.git`
