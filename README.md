@@ -116,11 +116,15 @@ python backend/generate_avatars.py
 ├── frontend/                 # Vue 3 前端
 │   ├── src/
 │   │   ├── components/       # Vue 组件
-│   │   │   ├── SendForm.vue  # 发送表单
-│   │   │   ├── ProjectGrid.vue # 项目卡片网格
-│   │   │   ├── SelectedCard.vue  # 选中项概览
-│   │   │   ├── DetailModal.vue   # 详情弹窗
-│   │   │   └── LogModal.vue      # 日志弹窗
+│   │   │   ├── SendForm.vue        # 发送表单
+│   │   │   ├── ProjectCard.vue     # 项目缩略卡片
+│   │   │   ├── ProjectGrid.vue     # 项目网格
+│   │   │   ├── SelectedCard.vue    # 选中项概览
+│   │   │   ├── DetailModal.vue     # 详情弹窗
+│   │   │   ├── LogModal.vue        # 日志弹窗
+│   │   │   ├── ConfirmDialog.vue   # 确认弹窗
+│   │   │   ├── ReplyPreviewModal.vue # 回复预览
+│   │   │   └── Toast.vue           # 提示框
 │   │   ├── utils/
 │   │   │   └── avatar.js     # 头像路径工具
 │   │   └── App.vue           # 主布局
