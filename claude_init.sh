@@ -12,9 +12,9 @@ if command -v claude &>/dev/null; then
 fi
 
 echo ""
-echo "正在安装 Claude Code CLI ..."
+echo "使用 npm 全局安装 @anthropic-ai/claude-code ..."
 
-curl -fsSL https://claude.ai/install.sh | bash
+sudo npm install -g @anthropic-ai/claude-code
 
 echo ""
 echo -e "\033[0;32m[OK]\033[0m 安装完成，验证版本:"
@@ -22,6 +22,6 @@ claude --version
 
 echo ""
 echo "==================================="
-echo "  验证通过！"
+echo "  安装完成！"
 echo "  返回: claude --version"
 echo "==================================="
